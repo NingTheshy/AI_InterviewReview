@@ -1,0 +1,119 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ai-interview
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:root}
+      database: ${REDIS_DATABASE:0}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:ai_interview}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD}
+    druid:
+      initial-size: 5
+      min-idle: 5
+      max-active: 20
+      max-wait: 60000
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+      filter:
+        stat:
+          enabled: true
+          slow-sql-millis: 1000
+          log-slow-sql: true
+        wall:
+          enabled: true
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 200MB
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: 604800
+
+interview:
+  file:
+    upload-dir: ./uploads
+    base-url: /files
+
+ai:
+  providers:
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY}
+      api-endpoint: https://api.deepseek.com/v1
+      model-name: deepseek-chat
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      api-endpoint: https://api.openai.com/v1
+      model-name: gpt-4o
+    whisper:
+      api-key: ${WHISPER_API_KEY:${OPENAI_API_KEY}}
+      api-endpoint: https://api.openai.com/v1
+      model-name: whisper-1
+    xiaomi:
+      api-key: ${XIAOMI_API_KEY}
+      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
+      model-name: mimo-v2.5
+    funasr:
+      api-key: ${FUNASR_API_KEY}
+      api-endpoint: ${FUNASR_API_ENDPOINT:https://dashscope.aliyuncs.com/api/v1}
+      model-name: paraformer-v2
+
+async:
+  core-pool-size: 4
+  max-pool-size: 8
+  queue-capacity: 100
+  thread-name-prefix: interview-async-
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+logging:
+  level:
+    com.interview: debug
+    root: info
