@@ -3,7 +3,7 @@ package com.interview.ai.util;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.ai.config.StructuredOutputProperties;
-import com.interview.ai.service.AiModelClient;
+import com.interview.ai.service.LlmClient;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -31,13 +31,13 @@ public class StructuredOutputInvoker {
     /**
      * 带重试和 JSON 修复的 LLM 调用
      *
-     * @param client       AI 客户端
+     * @param client       LLM 客户端
      * @param prompt       用户提示
      * @param systemPrompt 系统提示
      * @param configId     配置 ID
      * @return 解析后的 JsonNode
      */
-    public JsonNode invoke(AiModelClient client, String prompt, String systemPrompt, Long configId) {
+    public JsonNode invoke(LlmClient client, String prompt, String systemPrompt, Long configId) {
         int maxAttempts = properties.getMaxRetryAttempts();
         String lastResponse = null;
 

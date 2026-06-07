@@ -9,6 +9,18 @@ spring:
 jwt:
   secret: ${JWT_SECRET:dev-only-secret-key-not-for-production}
 
+# AI 配置（开发环境 - 使用小米）
+ai:
+  providers:
+    xiaomi-asr:
+      api-key: ${XIAOMI_API_KEY}
+      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
+      model-name: mimo-v2.5-asr
+    xiaomi:
+      api-key: ${XIAOMI_API_KEY}
+      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
+      model-name: mimo-v2.5-pro
+
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

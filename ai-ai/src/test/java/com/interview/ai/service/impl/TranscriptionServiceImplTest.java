@@ -1,10 +1,12 @@
 package com.interview.ai.service.impl;
 
-import com.interview.ai.entity.AiConfig;
+import com.interview.ai.audio.AudioPreprocessor;
+import com.interview.ai.audio.AudioSplitter;
+import com.interview.ai.audio.ReliableSender;
+import com.interview.ai.audio.TextMerger;
+import com.interview.ai.config.AudioChunkProperties;
 import com.interview.ai.factory.AiClientFactory;
-import com.interview.ai.service.AiConfigService;
-import com.interview.ai.service.AiModelClient;
-import com.interview.common.constant.ConfigType;
+import com.interview.ai.service.AsrClient;
 import com.interview.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -32,10 +33,22 @@ class TranscriptionServiceImplTest {
     private AiClientFactory aiClientFactory;
 
     @Mock
-    private AiConfigService aiConfigService;
+    private AsrClient asrClient;
 
     @Mock
-    private AiModelClient aiModelClient;
+    private AudioChunkProperties chunkProperties;
+
+    @Mock
+    private AudioPreprocessor audioPreprocessor;
+
+    @Mock
+    private AudioSplitter audioSplitter;
+
+    @Mock
+    private ReliableSender reliableSender;
+
+    @Mock
+    private TextMerger textMerger;
 
     @InjectMocks
     private TranscriptionServiceImpl transcriptionService;
@@ -43,14 +56,10 @@ class TranscriptionServiceImplTest {
     @TempDir
     Path tempDir;
 
-    private AiConfig mockConfig;
-
     @BeforeEach
     void setUp() {
-        mockConfig = new AiConfig();
-        mockConfig.setId(1L);
-        mockConfig.setProvider("funasr");
-        mockConfig.setConfigType(ConfigType.ASR.getCode());
+        // 默认配置：小文件直传阈值 6MB
+        lenient().when(chunkProperties.getMaxDirectSize()).thenReturn(6291456L);
     }
 
     @Test
@@ -61,18 +70,18 @@ class TranscriptionServiceImplTest {
     }
 
     @Test
-    @DisplayName("transcribe - 成功转录音频文件")
+    @DisplayName("transcribe - 小文件直传成功")
     void transcribe_validFile_returnsTranscript() throws IOException {
         Path audioFile = tempDir.resolve("test.wav");
         Files.write(audioFile, new byte[]{1, 2, 3, 4, 5});
 
-        when(aiClientFactory.getDefaultClient(ConfigType.ASR.getCode())).thenReturn(aiModelClient);
-        when(aiModelClient.transcribe(any(), eq("zh"))).thenReturn("转录结果文本");
+        when(aiClientFactory.getAsrClientByConfigId(null)).thenReturn(asrClient);
+        when(asrClient.transcribe(any(), eq("zh"))).thenReturn("转录结果文本");
 
         String result = transcriptionService.transcribe(audioFile.toString(), null);
 
         assertEquals("转录结果文本", result);
-        verify(aiModelClient).transcribe(any(), eq("zh"));
+        verify(asrClient).transcribe(any(), eq("zh"));
     }
 
     @Test
@@ -81,14 +90,12 @@ class TranscriptionServiceImplTest {
         Path audioFile = tempDir.resolve("test.wav");
         Files.write(audioFile, new byte[]{1, 2, 3, 4, 5});
 
-        when(aiConfigService.getDetail(1L)).thenReturn(mockConfig);
-        when(aiClientFactory.getClient("funasr")).thenReturn(aiModelClient);
-        when(aiModelClient.transcribe(any(), eq("zh"))).thenReturn("转录结果");
+        when(aiClientFactory.getAsrClientByConfigId(1L)).thenReturn(asrClient);
+        when(asrClient.transcribe(any(), eq("zh"))).thenReturn("转录结果");
 
         String result = transcriptionService.transcribe(audioFile.toString(), 1L);
 
         assertEquals("转录结果", result);
-        verify(aiConfigService).getDetail(1L);
-        verify(aiClientFactory).getClient("funasr");
+        verify(aiClientFactory).getAsrClientByConfigId(1L);
     }
 }

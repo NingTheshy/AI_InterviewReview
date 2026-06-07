@@ -3,10 +3,9 @@ package com.interview.ai.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.ai.factory.AiClientFactory;
-import com.interview.ai.service.AiModelClient;
 import com.interview.ai.service.CompanyClassifier;
+import com.interview.ai.service.LlmClient;
 import com.interview.common.constant.CompanyTier;
-import com.interview.common.constant.ConfigType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -114,7 +113,7 @@ public class CompanyClassifierImpl implements CompanyClassifier {
 
     private CompanyTier classifyByAi(String companyName, String industry, String jdText) {
         try {
-            AiModelClient client = aiClientFactory.getDefaultClient(ConfigType.LLM.getCode());
+            LlmClient client = aiClientFactory.getDefaultLlmClient();
 
             String jdSnippet = jdText != null && jdText.length() > 200
                     ? jdText.substring(0, 200) + "..."

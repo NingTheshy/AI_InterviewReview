@@ -43,4 +43,24 @@ public interface ScoringService {
      * @return JSON 格式的汇总评分结果
      */
     String analyzeAndScoreBatch(String text, String jdText, String resumeText, Long configId, Integer companyTier);
+
+    /**
+     * 双阶段分批评估（高精度模式）
+     * <p>
+     * 第一阶段：纯分析 — 提取每个维度的观察、证据和层级分类（不打分）
+     * 第二阶段：评分 — 基于层级分类映射到精确分数区间
+     * </p>
+     * <p>
+     * 优势：分析与评分分离，层级分类比直接打分更稳定
+     * 成本：约为普通分批评估的 2 倍 LLM 调用
+     * </p>
+     *
+     * @param text        面试对话文本
+     * @param jdText      岗位 JD
+     * @param resumeText  简历文本
+     * @param configId    AI 配置 ID（null 使用默认）
+     * @param companyTier 公司档次代码（1-5）
+     * @return JSON 格式的汇总评分结果
+     */
+    String analyzeAndScoreBatchTwoPhase(String text, String jdText, String resumeText, Long configId, Integer companyTier);
 }

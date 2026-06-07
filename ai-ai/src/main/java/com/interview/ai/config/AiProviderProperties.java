@@ -14,4 +14,6 @@ public class AiProviderProperties {
     private String apiKey;
     private String apiEndpoint;
     private String modelName;
+    /** LLM 调用超时时间（秒），默认 300（5 分钟） */
+    private int timeoutSeconds = 300;
 }

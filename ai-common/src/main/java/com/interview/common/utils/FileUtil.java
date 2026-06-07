@@ -5,9 +5,11 @@ import com.interview.common.exception.BusinessException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.Set;
 import java.util.UUID;
 
@@ -130,12 +132,14 @@ public class FileUtil {
      * @throws IOException 文件保存失败时抛出
      */
     public static Path saveFile(MultipartFile file, String uploadDir, String fileName) throws IOException {
-        Path uploadPath = Paths.get(uploadDir);
+        Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
         }
         Path filePath = uploadPath.resolve(fileName);
-        file.transferTo(filePath.toFile());
+        try (InputStream inputStream = file.getInputStream()) {
+            Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);
+        }
         return filePath;
     }
 }

@@ -1,9 +1,8 @@
 package com.interview.ai.service.impl;
 
 import com.interview.ai.factory.AiClientFactory;
-import com.interview.ai.service.AiModelClient;
+import com.interview.ai.service.LlmClient;
 import com.interview.common.constant.CompanyTier;
-import com.interview.common.constant.ConfigType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,7 +26,7 @@ class CompanyClassifierImplTest {
     private AiClientFactory aiClientFactory;
 
     @Mock
-    private AiModelClient aiModelClient;
+    private LlmClient llmClient;
 
     @InjectMocks
     private CompanyClassifierImpl companyClassifier;
@@ -61,20 +60,20 @@ class CompanyClassifierImplTest {
     @DisplayName("classify - unknown company calls AI")
     void classify_unknownCompany_callsAi() throws Exception {
         String aiResponse = "{\"tier\": 2, \"reason\": \"big company\"}";
-        when(aiClientFactory.getDefaultClient(ConfigType.LLM.getCode())).thenReturn(aiModelClient);
-        when(aiModelClient.call(anyString(), anyString(), isNull())).thenReturn(aiResponse);
+        when(aiClientFactory.getDefaultLlmClient()).thenReturn(llmClient);
+        when(llmClient.call(anyString(), anyString(), isNull())).thenReturn(aiResponse);
 
         CompanyTier result = companyClassifier.classify("UnknownCompany", "互联网", "JD text");
 
         assertEquals(CompanyTier.TIER_2, result);
-        verify(aiModelClient).call(anyString(), anyString(), isNull());
+        verify(llmClient).call(anyString(), anyString(), isNull());
     }
 
     @Test
     @DisplayName("classify - AI failure returns default tier 3")
     void classify_aiFailure_returnsTier3() {
-        when(aiClientFactory.getDefaultClient(ConfigType.LLM.getCode())).thenReturn(aiModelClient);
-        when(aiModelClient.call(anyString(), anyString(), isNull()))
+        when(aiClientFactory.getDefaultLlmClient()).thenReturn(llmClient);
+        when(llmClient.call(anyString(), anyString(), isNull()))
                 .thenThrow(new RuntimeException("AI call failed"));
 
         CompanyTier result = companyClassifier.classify("UnknownCompany", "互联网", null);
@@ -86,8 +85,8 @@ class CompanyClassifierImplTest {
     @DisplayName("classify - AI invalid tier returns default tier 3")
     void classify_aiInvalidTier_returnsTier3() throws Exception {
         String aiResponse = "{\"tier\": 99, \"reason\": \"invalid\"}";
-        when(aiClientFactory.getDefaultClient(ConfigType.LLM.getCode())).thenReturn(aiModelClient);
-        when(aiModelClient.call(anyString(), anyString(), isNull())).thenReturn(aiResponse);
+        when(aiClientFactory.getDefaultLlmClient()).thenReturn(llmClient);
+        when(llmClient.call(anyString(), anyString(), isNull())).thenReturn(aiResponse);
 
         CompanyTier result = companyClassifier.classify("UnknownCompany", "互联网", null);
 

@@ -292,8 +292,14 @@ public class InterviewServiceImpl implements InterviewService {
      * <p>
      * 实现逻辑：
      * 1. 校验面试存在性及用户所有权
-     * 2. 重置状态为 UPLOADED，处理步骤归零
-     * 3. 重新触发异步处理
+     * 2. 仅拒绝处理中的记录（防止重复处理）
+     * 3. 重置状态为 PROCESSING，处理步骤归零
+     * 4. 重新触发异步处理（从语音转文字开始全流程重跑）
+     * </p>
+     * <p>
+     * 支持场景：
+     * - 失败记录重试：处理失败后修复问题重新处理
+     * - 手动重新评分：已完成的面试用更新后的评分策略重新评估
      * </p>
      */
     @Override
@@ -307,20 +313,24 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException(ErrorCode.INTERVIEW_ACCESS_DENIED.getCode(),
                     ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
         }
-        if (interview.getStatus() != InterviewStatus.FAILED.getCode()) {
-            throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(),
-                    "仅支持重试失败的面试记录");
+        // PROCESSING 状态也允许重试（可能是之前卡住的记录）
+        if (interview.getStatus() == InterviewStatus.PROCESSING.getCode()) {
+            log.warn("面试记录处于处理中状态，允许强制重试: interviewId={}", id);
         }
+
+        // 记录原状态用于日志
+        String previousStatus = InterviewStatus.fromCode(interview.getStatus()).getDescription();
 
         // 重置状态
         interview.setStatus(InterviewStatus.PROCESSING.getCode());
         interview.setProcessingStep(0);
+        interview.setErrorMessage(null);
         interviewMapper.updateById(interview);
 
         // 重新异步处理
         interviewAsyncService.processInterview(id);
 
-        log.info("重试面试处理: id={}", id);
+        log.info("重新处理面试: id={}, 之前状态={}", id, previousStatus);
     }
 
     // ==================== 私有方法 ====================

@@ -79,6 +79,7 @@ ai:
       api-key: ${DEEPSEEK_API_KEY}
       api-endpoint: https://api.deepseek.com/v1
       model-name: deepseek-chat
+      timeout-seconds: 600
     openai:
       api-key: ${OPENAI_API_KEY}
       api-endpoint: https://api.openai.com/v1
@@ -90,11 +91,30 @@ ai:
     xiaomi:
       api-key: ${XIAOMI_API_KEY}
       api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
-      model-name: mimo-v2.5
+      model-name: mimo-v2.5-pro
+    xiaomi-asr:
+      api-key: ${XIAOMI_API_KEY}
+      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
+      model-name: mimo-v2.5-asr
     funasr:
       api-key: ${FUNASR_API_KEY}
       api-endpoint: ${FUNASR_API_ENDPOINT:https://dashscope.aliyuncs.com/api/v1}
       model-name: paraformer-v2
+  # 音频分片转录配置
+  chunk:
+    max-direct-size: 6291456       # 6MB，小于该值直传（base64编码后约8MB，留余量）
+    min-segment-duration: 30       # 最小片段时长（秒），防止过多碎片
+    max-segment-duration: 180      # 最大片段时长（秒），约5.76MB，base64后<8MB，安全低于ASR 10MB限制
+    min-silence-duration: 1.0      # 最小静音间隙（秒），面试自然停顿通常较短
+    overlap-duration: 1.5          # 重叠窗口（秒），避免切分点词语断裂
+    silence-threshold: 300.0       # 静音检测 RMS 阈值（16bit PCM），低于此值视为静音
+    concurrency: 2                 # 并发发送窗口
+    max-retries: 3                 # 单片段最大重试次数
+    timeout-seconds: 30            # 单次 ASR 请求超时
+    ffmpeg-path: ${FFMPEG_PATH:ffmpeg}  # FFmpeg 路径，默认从系统 PATH 查找
+  # 评分模式配置
+  scoring:
+    two-phase-enabled: ${SCORING_TWO_PHASE}  # 双阶段评分（高精度，2倍LLM调用）
 
 async:
   core-pool-size: 4

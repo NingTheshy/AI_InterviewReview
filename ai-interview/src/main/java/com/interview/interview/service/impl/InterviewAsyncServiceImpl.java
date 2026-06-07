@@ -32,6 +32,9 @@ public class InterviewAsyncServiceImpl implements InterviewAsyncService {
     @Value("${interview.file.upload-dir:./uploads}")
     private String uploadDir;
 
+    @Value("${ai.scoring.two-phase-enabled:false}")
+    private boolean twoPhaseEnabled;
+
     @Override
     @Async("asyncExecutor")
     public void processInterview(Long interviewId) {
@@ -68,7 +71,13 @@ public class InterviewAsyncServiceImpl implements InterviewAsyncService {
             updateStep(interview, 2);
             String jdText = interview.getJdText();
             String resumeText = interview.getResumeText();
-            String scoreResult = scoringService.analyzeAndScoreBatch(transcript, jdText, resumeText, null, tier.getCode());
+            String scoreResult;
+            if (twoPhaseEnabled) {
+                log.info("使用双阶段评分模式（高精度）");
+                scoreResult = scoringService.analyzeAndScoreBatchTwoPhase(transcript, jdText, resumeText, null, tier.getCode());
+            } else {
+                scoreResult = scoringService.analyzeAndScoreBatch(transcript, jdText, resumeText, null, tier.getCode());
+            }
 
             // 步骤 3: 解析评分结果
             updateStep(interview, 3);

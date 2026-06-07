@@ -3,7 +3,7 @@ package com.interview.ai.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.ai.config.AiProviderProperties;
-import com.interview.ai.service.AiModelClient;
+import com.interview.ai.service.AsrClient;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +23,7 @@ import java.util.Map;
  * </p>
  */
 @Slf4j
-public class DashScopeAsrClient implements AiModelClient {
+public class DashScopeAsrClient implements AsrClient {
 
     /** 最大轮询次数（可通过构造参数配置） */
     private final int maxPollAttempts;
@@ -48,11 +48,6 @@ public class DashScopeAsrClient implements AiModelClient {
                 .baseUrl(properties.getApiEndpoint())
                 .defaultHeader("Authorization", "Bearer " + properties.getApiKey())
                 .build();
-    }
-
-    @Override
-    public String call(String prompt, String systemPrompt, Long configId) {
-        throw new UnsupportedOperationException("DashScope ASR 客户端不支持文本生成");
     }
 
     @Override

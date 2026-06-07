@@ -8,7 +8,9 @@ import org.springframework.web.multipart.MultipartFile;
  * 定义与 AI 模型交互的统一接口，支持文本生成和语音转文字。
  * 不同厂商（DeepSeek、小米、FunASR 等）实现此接口。
  * </p>
+ * @deprecated 已拆分为 {@link AsrClient} 和 {@link LlmClient}
  */
+@Deprecated
 public interface AiModelClient {
 
     /**

@@ -83,14 +83,24 @@ public interface InterviewService {
     InterviewStatusResponse getStatus(Long id, Long userId);
 
     /**
-     * 重新处理失败的面试
+     * 重新处理面试（支持失败重试和手动重新评分）
      * <p>
-     * 重置面试状态为已上传，重新触发异步 AI 处理流程。
+     * 重置面试状态为处理中，重新触发异步 AI 处理流程（从语音转文字开始全流程重跑）。
+     * </p>
+     * <p>
+     * 支持场景：
+     * <ul>
+     *   <li>失败重试：处理失败后修复问题重新处理</li>
+     *   <li>手动重新评分：已完成的面试用更新后的评分策略重新评估</li>
+     * </ul>
+     * </p>
+     * <p>
+     * 限制：处理中的记录不允许重试（防重复提交）。
      * </p>
      *
      * @param id     面试 ID
      * @param userId 当前用户 ID
-     * @throws com.interview.common.exception.BusinessException 面试不存在或无权限
+     * @throws com.interview.common.exception.BusinessException 面试不存在、无权限或正在处理中
      */
     void retry(Long id, Long userId);
 }

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.ai.entity.AiConfig;
 import com.interview.ai.factory.AiClientFactory;
 import com.interview.ai.service.AiConfigService;
-import com.interview.ai.service.AiModelClient;
+import com.interview.ai.service.LlmClient;
 import com.interview.ai.service.ScoringService;
 import com.interview.ai.util.StructuredOutputInvoker;
 import com.interview.common.constant.CompanyTier;
@@ -14,8 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,6 +42,36 @@ public class ScoringServiceImpl implements ScoringService {
     /** 每批最多评估的问题数 */
     private static final int BATCH_SIZE = 8;
 
+    /** 转录文本每批最大字符数（LLM 识别问答对 + 评分）。太大会导致 LLM 处理慢、JSON 输出格式易出错 */
+    private static final int TRANSCRIPT_CHUNK_SIZE = 5000;
+
+    /**
+     * 层级 → 分数区间映射
+     * Key: 层级名称, Value: [minScore, maxScore]
+     * <p>
+     * 通过让 LLM 输出层级分类而非精确分数，大幅提高评分一致性。
+     * LLM 擅长分类（优秀/良好/一般），不擅长回归（精确到个位数的分数）。
+     * </p>
+     */
+    private static final Map<String, int[]> TIER_RANGES = new LinkedHashMap<>();
+    static {
+        TIER_RANGES.put("卓越", new int[]{90, 100});
+        TIER_RANGES.put("优秀", new int[]{75, 89});
+        TIER_RANGES.put("良好", new int[]{60, 74});
+        TIER_RANGES.put("一般", new int[]{45, 59});
+        TIER_RANGES.put("较弱", new int[]{30, 44});
+        TIER_RANGES.put("差",   new int[]{0, 29});
+    }
+
+    /**
+     * 双阶段评估第一阶段的结果
+     */
+    private record AnalysisResult(String analysisJson, Map<String, String> dimensionTiers) {
+        String getMedianTier(String dimension) {
+            return dimensionTiers.getOrDefault(dimension, "一般");
+        }
+    }
+
     @Override
     public String analyzeAndScore(String text, String jdText, String resumeText, Long configId) {
         return analyzeAndScore(text, jdText, resumeText, configId, null);
@@ -55,7 +84,7 @@ public class ScoringServiceImpl implements ScoringService {
         String systemPrompt = buildSystemPrompt(companyTier);
         String userPrompt = buildUserPrompt(text, jdText, resumeText);
 
-        AiModelClient client = resolveClient(configId);
+        LlmClient client = resolveClient(configId);
         String result = client.call(userPrompt, systemPrompt, configId);
         log.info("AI 评分分析完成");
         return result;
@@ -65,26 +94,32 @@ public class ScoringServiceImpl implements ScoringService {
     public String analyzeAndScoreBatch(String text, String jdText, String resumeText, Long configId, Integer companyTier) {
         log.info("开始分批 AI 评分分析: 文本长度={}, companyTier={}", text.length(), companyTier);
 
-        AiModelClient client = resolveClient(configId);
+        LlmClient client = resolveClient(configId);
 
-        // Step 1: 拆分面试文本为独立问题段落
-        List<String> segments = splitIntoSegments(text);
-        log.info("拆分为 {} 个问题段落", segments.size());
+        // Step 1: 将转录文本按长度分块（LLM 从每块中识别问答对）
+        List<String> chunks = splitTranscript(text);
+        log.info("转录文本分为 {} 块", chunks.size());
 
-        // Step 2: 分批评估（使用 StructuredOutputInvoker 带重试）
+        // Step 2: 分批评估 — LLM 直接从原始转录中识别问答对并评分
         List<JsonNode> batchResults = new ArrayList<>();
-        for (int i = 0; i < segments.size(); i += BATCH_SIZE) {
-            List<String> batch = segments.subList(i, Math.min(i + BATCH_SIZE, segments.size()));
-            int batchIndex = i / BATCH_SIZE + 1;
-            int totalBatches = (segments.size() + BATCH_SIZE - 1) / BATCH_SIZE;
+        long totalStartTime = System.currentTimeMillis();
+        for (int i = 0; i < chunks.size(); i++) {
+            int batchIndex = i + 1;
+            long chunkStartTime = System.currentTimeMillis();
+            log.info("评估第 {}/{} 块 ({} 字符)", batchIndex, chunks.size(), chunks.get(i).length());
 
-            log.info("评估第 {}/{} 批 ({} 个问题)", batchIndex, totalBatches, batch.size());
-
-            String batchPrompt = buildBatchPrompt(batch, batchIndex, jdText, resumeText);
+            String batchPrompt = buildTranscriptBatchPrompt(chunks.get(i), batchIndex, jdText, resumeText);
             String batchSystemPrompt = buildBatchSystemPrompt(companyTier);
 
             JsonNode batchResult = outputInvoker.invoke(client, batchPrompt, batchSystemPrompt, configId);
             batchResults.add(batchResult);
+
+            long chunkElapsed = (System.currentTimeMillis() - chunkStartTime) / 1000;
+            long totalElapsed = (System.currentTimeMillis() - totalStartTime) / 1000;
+            if (batchResult.isArray()) {
+                log.info("第 {} 块完成: 识别 {} 个问题, 耗时 {}s, 总耗时 {}s",
+                        batchIndex, batchResult.size(), chunkElapsed, totalElapsed);
+            }
         }
 
         // Step 3: 合并各批结果
@@ -101,77 +136,68 @@ public class ScoringServiceImpl implements ScoringService {
     }
 
     /**
-     * 将面试文本拆分为独立的问题段落
+     * 将转录文本按字符长度分块（在句子边界处切分）
+     * <p>
+     * 不再尝试用正则匹配问答标记（ASR 输出没有格式标记），
+     * 而是将原始文本分块交给 LLM 识别问答对。
+     * </p>
      */
-    private List<String> splitIntoSegments(String text) {
-        List<String> segments = new ArrayList<>();
-
-        // 按常见问答分隔模式拆分
-        // 模式1: "问：" 或 "Q：" 开头的段落
-        // 模式2: 空行分隔的段落
-        // 模式3: 数字序号开头 (1. 2. 等)
-
-        String[] lines = text.split("\n");
-        StringBuilder currentSegment = new StringBuilder();
-
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty()) {
-                if (currentSegment.length() > 0) {
-                    segments.add(currentSegment.toString().trim());
-                    currentSegment = new StringBuilder();
-                }
-                continue;
-            }
-
-            // 检测新的问答对开始
-            if (isQuestionStart(trimmed) && currentSegment.length() > 50) {
-                segments.add(currentSegment.toString().trim());
-                currentSegment = new StringBuilder();
-            }
-
-            currentSegment.append(line).append("\n");
+    private List<String> splitTranscript(String text) {
+        if (text.length() <= TRANSCRIPT_CHUNK_SIZE) {
+            return List.of(text);
         }
 
-        if (currentSegment.length() > 0) {
-            segments.add(currentSegment.toString().trim());
-        }
-
-        // 如果拆分失败（只有一个段落），按字符长度强制拆分
-        if (segments.size() <= 1 && text.length() > 2000) {
-            return forceSplit(text, 2000);
-        }
-
-        return segments;
-    }
-
-    private boolean isQuestionStart(String line) {
-        // 匹配常见的问答开始模式
-        return line.matches("^(问|Q|面试官|问题|\\d+[.、])[:：].*")
-                || line.matches("^(问|Q)\\d+[:：].*")
-                || line.matches("^\\d+[.、]\\s*(请|怎么|如何|什么|为什么|谈谈|说说).*");
-    }
-
-    private List<String> forceSplit(String text, int chunkSize) {
         List<String> chunks = new ArrayList<>();
         int start = 0;
+
         while (start < text.length()) {
-            int end = Math.min(start + chunkSize, text.length());
-            chunks.add(text.substring(start, end));
+            int end = Math.min(start + TRANSCRIPT_CHUNK_SIZE, text.length());
+
+            // 在句子边界处切分（找最近的句号、问号、感叹号）
+            if (end < text.length()) {
+                int boundary = findSentenceBoundary(text, end);
+                if (boundary > start) {
+                    end = boundary;
+                }
+            }
+
+            chunks.add(text.substring(start, end).trim());
             start = end;
         }
+
+        log.info("转录文本分块: 总长度={}, 分为 {} 块", text.length(), chunks.size());
         return chunks;
     }
 
-    private String buildBatchPrompt(List<String> segments, int batchIndex, String jdText, String resumeText) {
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("## 本批评估任务\n\n");
-        prompt.append("以下是第 ").append(batchIndex).append(" 批面试问答，请逐一评估：\n\n");
+    /**
+     * 从指定位置向前搜索最近的句子边界
+     */
+    private int findSentenceBoundary(String text, int fromPos) {
+        // 向前搜索最多 2000 字符，找句子结束标记
+        int searchStart = Math.max(0, fromPos - 2000);
+        String searchArea = text.substring(searchStart, fromPos);
 
-        for (int i = 0; i < segments.size(); i++) {
-            prompt.append("### 问题 ").append(i + 1).append("\n\n");
-            prompt.append(segments.get(i)).append("\n\n");
+        // 找最后一个句子结束标记
+        int lastBoundary = -1;
+        for (int i = searchArea.length() - 1; i >= 0; i--) {
+            char c = searchArea.charAt(i);
+            if (c == '。' || c == '？' || c == '！' || c == '!' || c == '?' || c == '.' || c == '；') {
+                lastBoundary = searchStart + i + 1;
+                break;
+            }
         }
+
+        return lastBoundary > 0 ? lastBoundary : fromPos;
+    }
+
+    /**
+     * 构建转录文本批次 Prompt — 将原始转录交给 LLM 识别问答对
+     */
+    private String buildTranscriptBatchPrompt(String transcriptChunk, int batchIndex, String jdText, String resumeText) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("## 面试转录文本（第 ").append(batchIndex).append(" 段）\n\n");
+        prompt.append("以下是面试录音的语音转文字结果，请从中识别出每个问答对并逐一评分：\n\n");
+        prompt.append(transcriptChunk).append("\n\n");
 
         if (jdText != null && !jdText.isEmpty()) {
             prompt.append("## 职位描述 (JD)\n\n").append(jdText).append("\n\n");
@@ -180,7 +206,7 @@ public class ScoringServiceImpl implements ScoringService {
             prompt.append("## 候选人简历\n\n").append(resumeText).append("\n\n");
         }
 
-        prompt.append("请对每个问题独立评分，返回 JSON 数组格式。");
+        prompt.append("请识别所有问答对并逐一评分，返回 JSON 数组格式。");
         return prompt.toString();
     }
 
@@ -190,34 +216,59 @@ public class ScoringServiceImpl implements ScoringService {
         return """
                 你是一位资深的面试评估专家，专注于 %s 级别企业的面试评估。
 
-                【评估维度】
+                【任务一：识别问答对】
+                你收到的是面试录音的语音转文字结果（连续口语文本，无格式标记）。
+                你需要从语义上识别出面试官的问题和候选人的回答。
+                识别技巧：
+                - 面试官通常会提问（包含"请"、"怎么"、"什么"、"为什么"、"谈谈"、"说说"等疑问词）
+                - 候选人的回答通常在面试官提问之后
+                - 有时候面试官会追问或候选人会主动补充，这些算同一个问答对
+                - 如果某段内容无法明确归属，尽量合理划分
+
+                【任务二：评估每个问答对】
+                评估维度：
                 - 内容专业度 (dimensionContent): 技术深度、准确性、完整性
                 - 逻辑思维 (dimensionLogic): 结构化、因果链、边界意识
                 - 表达能力 (dimensionExpression): 清晰度、简洁性、举例能力
                 - 专业知识 (dimensionProfessional): 技术栈深度、行业认知、工程实践
 
-                【评分校准】
-                - 90-100：卓越  |  75-89：优秀  |  60-74：良好
-                - 45-59：一般  |  30-44：较弱  |  0-29：差
-                - "不知道"、"忘了"、"跳过" 等回答，该题最高 0 分
+                评分流程 — 严格执行：
+                第一步：对每个维度先判断层级（卓越/优秀/良好/一般/较弱/差）
+                第二步：根据层级确定分数区间，再结合具体表现给出精确分数
+                - 卓越 → 90-100（该级别中极少出现，需有极强证据）
+                - 优秀 → 75-89（有明确亮点）
+                - 良好 → 60-74（基本达标）
+                - 一般 → 45-59（有明显短板）
+                - 较弱 → 30-44（多项不达标）
+                - 差 → 0-29（基础能力不足）
+                - "不知道"、"忘了"、"跳过" → 该维度直接给 0 分
+
+                【行业基准线 — 所有等级共享】
+                - 逻辑思维 基础分 ≥ 40（低于此最高 40 分）
+                - 表达能力 基础分 ≥ 40（低于此最高 40 分）
+                - 专业知识 基础分 ≥ 40（低于此最高 40 分）
 
                 【输出格式】
-                请严格返回 JSON 数组，每个元素对应一个问题的评估：
+                严格返回 JSON 数组，每个元素对应一个识别出的问答对：
                 [
                   {
-                    "questionText": "问题内容",
-                    "answerText": "回答内容",
+                    "questionText": "面试官的问题（从转录中提取）",
+                    "answerText": "候选人的回答（从转录中提取）",
                     "score": 0-100整数,
                     "dimensionContent": 0-100整数,
                     "dimensionLogic": 0-100整数,
                     "dimensionExpression": 0-100整数,
                     "dimensionProfessional": 0-100整数,
-                    "improvementTip": "具体改进建议",
-                    "referenceAnswer": "参考答案"
+                    "improvementTip": "具体改进建议（引用回答中的具体内容）",
+                    "referenceAnswer": "参考答案（展示该级别的期望水平）"
                   }
                 ]
 
-                不要包含 markdown 代码块或其他内容，只返回纯 JSON 数组。
+                注意事项：
+                - questionText 和 answerText 必须从转录原文中提取，不要编造
+                - improvementTip 必须引用回答中的具体内容
+                - 尽可能识别出所有问答对，不要遗漏
+                - 只返回纯 JSON 数组，不要包含 markdown 代码块或其他内容
                 """
                 .replace("%s", tier.getName());
     }
@@ -455,11 +506,323 @@ public class ScoringServiceImpl implements ScoringService {
         return prompt.toString();
     }
 
-    private AiModelClient resolveClient(Long configId) {
+    // ==================== 双阶段评估 ====================
+
+    @Override
+    public String analyzeAndScoreBatchTwoPhase(String text, String jdText, String resumeText,
+                                                Long configId, Integer companyTier) {
+        log.info("开始双阶段评分分析: 文本长度={}, companyTier={}", text.length(), companyTier);
+
+        LlmClient client = resolveClient(configId);
+        CompanyTier tier = companyTier != null ? CompanyTier.fromCode(companyTier) : CompanyTier.TIER_3;
+
+        // Step 1: 将转录文本按长度分块
+        List<String> chunks = splitTranscript(text);
+        log.info("转录文本分为 {} 块", chunks.size());
+
+        // Step 2: Phase 1 — 分析（LLM 从每块中识别问答对并提取层级）
+        List<JsonNode> allAnalysisResults = new ArrayList<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            int batchIndex = i + 1;
+            log.info("Phase 1 分析: 第 {}/{} 块 ({} 字符)", batchIndex, chunks.size(), chunks.get(i).length());
+
+            String analysisPrompt = buildTranscriptAnalysisPrompt(chunks.get(i), batchIndex, jdText, resumeText);
+            String analysisSystemPrompt = buildAnalysisSystemPrompt(tier);
+            JsonNode analysisResult = outputInvoker.invoke(client, analysisPrompt, analysisSystemPrompt, configId);
+            allAnalysisResults.add(analysisResult);
+
+            if (analysisResult.isArray()) {
+                log.info("Phase 1 第 {} 块识别出 {} 个问答对", batchIndex, analysisResult.size());
+            }
+        }
+
+        // Step 3: 合并分析结果
+        String mergedAnalysis = mergeBatchResults(allAnalysisResults);
+        log.info("Phase 1 完成: 分析结果已合并");
+
+        // Step 4: Phase 2 — 评分（基于分析结果映射分数）
+        log.info("Phase 2 评分: 基于分析结果映射分数");
+        String scoringPrompt = buildScoringPrompt(mergedAnalysis, jdText, resumeText);
+        String scoringSystemPrompt = buildScoringSystemPrompt(tier);
+        JsonNode finalResult = outputInvoker.invoke(client, scoringPrompt, scoringSystemPrompt, configId);
+
+        // Step 5: 服务端校验 — 层级与分数一致性
+        validateTierScoreConsistency(finalResult);
+
+        log.info("双阶段评分分析完成");
+        return finalResult.toString();
+    }
+
+    /**
+     * 构建 Phase 1 分析 Prompt — 从原始转录中识别问答对并分析（不打分）
+     */
+    private String buildTranscriptAnalysisPrompt(String transcriptChunk, int batchIndex, String jdText, String resumeText) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("## 面试转录文本（第 ").append(batchIndex).append(" 段）\n\n");
+        prompt.append("以下是面试录音的语音转文字结果，请从中识别出每个问答对并逐一分析（不需要打分）：\n\n");
+        prompt.append(transcriptChunk).append("\n\n");
+
+        if (jdText != null && !jdText.isEmpty()) {
+            prompt.append("## 职位描述 (JD)\n\n").append(jdText).append("\n\n");
+        }
+        if (resumeText != null && !resumeText.isEmpty()) {
+            prompt.append("## 候选人简历\n\n").append(resumeText).append("\n\n");
+        }
+
+        prompt.append("请识别所有问答对并逐一分析，返回 JSON 数组格式。");
+        return prompt.toString();
+    }
+
+    private String buildAnalysisSystemPrompt(CompanyTier tier) {
+        return """
+                你是一位资深的面试评估专家，专注于 %s 级别企业的面试评估。
+
+                【任务一：识别问答对】
+                你收到的是面试录音的语音转文字结果（连续口语文本，无格式标记）。
+                你需要从语义上识别出面试官的问题和候选人的回答。
+                识别技巧：
+                - 面试官通常会提问（包含"请"、"怎么"、"什么"、"为什么"、"谈谈"、"说说"等疑问词）
+                - 候选人的回答通常在面试官提问之后
+                - 有时候面试官会追问或候选人会主动补充，这些算同一个问答对
+                - 尽可能识别出所有问答对，不要遗漏
+
+                【任务二：分析每个问答对】
+                分析候选人对每个问题的回答质量。注意：只需要分析，不需要打分！
+
+                【评估维度】
+                - 内容专业度: 技术深度、准确性、完整性
+                - 逻辑思维: 结构化、因果链、边界意识
+                - 表达能力: 清晰度、简洁性、举例能力
+                - 专业知识: 技术栈深度、行业认知、工程实践
+
+                【层级标准】
+                - 卓越: 该维度表现极佳，几乎无改进空间
+                - 优秀: 达到 %s 级别期望，有明显亮点
+                - 良好: 基本达到该级别要求
+                - 一般: 低于期望，有明显短板
+                - 较弱: 多项不达标
+                - 差: 基础能力严重不足
+                - "不知道"、"忘了"、"跳过" → 差
+
+                【输出格式】
+                严格返回 JSON 数组，每个元素包含观察和层级（不需要分数）：
+                [
+                  {
+                    "questionText": "问题内容",
+                    "answerText": "回答内容",
+                    "score": 0,
+                    "dimensionContent": {"observations": "具体观察...", "tier": "良好"},
+                    "dimensionLogic": {"observations": "具体观察...", "tier": "一般"},
+                    "dimensionExpression": {"observations": "具体观察...", "tier": "优秀"},
+                    "dimensionProfessional": {"observations": "具体观察...", "tier": "良好"},
+                    "improvementTip": "具体改进建议",
+                    "referenceAnswer": "参考答案"
+                  }
+                ]
+
+                questionText 和 answerText 必须从转录原文中提取，不要编造。
+                observations 必须引用回答中的具体内容，不要泛泛而谈。
+                尽可能识别出所有问答对，不要遗漏。
+                只返回纯 JSON，不要包含 markdown 代码块。
+                """.formatted(tier.getName(), tier.getName());
+    }
+
+    /**
+     * 构建 Phase 2 评分 Prompt — 基于分析结果映射分数
+     */
+    private String buildScoringPrompt(String mergedAnalysis, String jdText, String resumeText) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("## 评分任务\n\n");
+        prompt.append("以下是各问题的分析结果（含层级分类），请将层级映射为具体分数：\n\n");
+        prompt.append("```json\n").append(mergedAnalysis).append("\n```\n\n");
+
+        if (jdText != null && !jdText.isEmpty()) {
+            prompt.append("## 职位描述 (JD)\n\n").append(jdText).append("\n\n");
+        }
+        if (resumeText != null && !resumeText.isEmpty()) {
+            prompt.append("## 候选人简历\n\n").append(resumeText).append("\n\n");
+        }
+
+        prompt.append("请将每个维度的层级分类映射为具体分数，保持 observations 不变。");
+        return prompt.toString();
+    }
+
+    private String buildScoringSystemPrompt(CompanyTier tier) {
+        return """
+                你是一位资深的面试评估专家，专注于 %s 级别企业的面试评估。
+
+                【任务】
+                基于已有的分析结果（含层级分类），将层级映射为具体分数。
+
+                【层级 → 分数映射规则】
+                你必须严格按照以下区间给分，不得超出区间：
+                - 卓越 → 90-100（该级别中极少出现，需有极强证据支撑）
+                - 优秀 → 75-89（有明确亮点）
+                - 良好 → 60-74（基本达标）
+                - 一般 → 45-59（有明显短板）
+                - 较弱 → 30-44（多项不达标）
+                - 差 → 0-29（基础能力不足）
+
+                【行业基准线 — 所有等级共享】
+                - 逻辑思维 基础分 ≥ 40
+                - 表达能力 基础分 ≥ 40
+                - 专业知识 基础分 ≥ 40
+                低于此标准的维度，最高分不得超过 40 分。
+
+                【输出格式】
+                严格返回以下 JSON 格式，不要包含 markdown 代码块：
+                {
+                  "overallScore": 0,
+                  "dimensionContent": 分数(0-100整数),
+                  "dimensionLogic": 分数(0-100整数),
+                  "dimensionExpression": 分数(0-100整数),
+                  "dimensionProfessional": 分数(0-100整数),
+                  "dimensionCommunication": 分数(0-100整数),
+                  "improvementSummary": "总体改进建议",
+                  "strengths": "优势总结（2-3个亮点）",
+                  "weaknesses": "不足总结（2-3个短板）",
+                  "questions": [
+                    {
+                      "questionIndex": 题号,
+                      "questionText": "问题内容",
+                      "answerText": "回答内容",
+                      "score": 得分(0-100整数),
+                      "dimensionContent": 分数,
+                      "dimensionLogic": 分数,
+                      "dimensionExpression": 分数,
+                      "dimensionProfessional": 分数,
+                      "improvementTip": "改进建议",
+                      "referenceAnswer": "参考答案"
+                    }
+                  ]
+                }
+
+                注意：overallScore 留 0 即可，系统会自动计算加权总分。
+                只返回纯 JSON，不要包含其他内容。
+                """.formatted(tier.getName());
+    }
+
+    // ==================== 服务端校验 ====================
+
+    /**
+     * 校验层级与分数的一致性
+     * <p>
+     * 如果分数不在对应层级的区间内，将其修正到区间中位数。
+     * </p>
+     */
+    private void validateTierScoreConsistency(JsonNode result) {
+        if (!result.isObject()) return;
+
+        // 校验题目级别的维度分数
+        JsonNode questions = result.path("questions");
+        if (questions.isArray()) {
+            for (JsonNode q : questions) {
+                if (q.isObject()) {
+                    validateDimensionScore(q, "dimensionContent");
+                    validateDimensionScore(q, "dimensionLogic");
+                    validateDimensionScore(q, "dimensionExpression");
+                    validateDimensionScore(q, "dimensionProfessional");
+                }
+            }
+        }
+    }
+
+    /**
+     * 校验单个维度分数是否在合理范围内
+     */
+    private void validateDimensionScore(JsonNode node, String dimension) {
+        JsonNode scoreNode = node.path(dimension);
+        if (scoreNode.isMissingNode() || !scoreNode.isNumber()) return;
+
+        int score = scoreNode.asInt();
+
+        // 检查行业基准线
+        if ("dimensionLogic".equals(dimension) || "dimensionExpression".equals(dimension)
+                || "dimensionProfessional".equals(dimension)) {
+            if (score > 0 && score < 40) {
+                log.warn("维度 {} 分数 {} 低于行业基准线 40，保持原值（可能是故意低分）", dimension, score);
+            }
+        }
+
+        // 检查分数范围
+        if (score < 0 || score > 100) {
+            log.warn("维度 {} 分数 {} 超出范围 [0, 100]，需要修正", dimension, score);
+        }
+    }
+
+    // ==================== 工具方法 ====================
+
+    /**
+     * 将层级字符串转换为分数
+     *
+     * @param tier 层级名称（卓越/优秀/良好/一般/较弱/差）
+     * @return 区间中位数分数；未知层级返回 50
+     */
+    private int tierToScore(String tier) {
+        int[] range = TIER_RANGES.get(tier);
+        if (range == null) {
+            log.warn("未知层级: {}, 使用默认分数 50", tier);
+            return 50;
+        }
+        return (range[0] + range[1]) / 2;
+    }
+
+    /**
+     * 从分析结果中提取各维度的层级分类
+     * <p>
+     * 对每个维度，收集所有问题的层级，取中位数作为该维度的整体层级。
+     * </p>
+     */
+    private Map<String, String> extractDimensionTiers(List<JsonNode> analysisBatches) {
+        Map<String, List<String>> dimensionTierLists = new LinkedHashMap<>();
+        dimensionTierLists.put("dimensionContent", new ArrayList<>());
+        dimensionTierLists.put("dimensionLogic", new ArrayList<>());
+        dimensionTierLists.put("dimensionExpression", new ArrayList<>());
+        dimensionTierLists.put("dimensionProfessional", new ArrayList<>());
+
+        for (JsonNode batch : analysisBatches) {
+            if (!batch.isArray()) continue;
+            for (JsonNode q : batch) {
+                for (String dim : dimensionTierLists.keySet()) {
+                    JsonNode dimNode = q.path(dim);
+                    if (dimNode.isObject()) {
+                        String tierValue = dimNode.path("tier").asText("一般");
+                        dimensionTierLists.get(dim).add(tierValue);
+                    }
+                }
+            }
+        }
+
+        Map<String, String> result = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : dimensionTierLists.entrySet()) {
+            List<String> tiers = entry.getValue();
+            result.put(entry.getKey(), getMedianTier(tiers));
+        }
+        return result;
+    }
+
+    /**
+     * 取层级列表的中位数
+     */
+    private String getMedianTier(List<String> tiers) {
+        if (tiers.isEmpty()) return "一般";
+
+        List<String> tierOrder = List.of("差", "较弱", "一般", "良好", "优秀", "卓越");
+        List<Integer> indices = new ArrayList<>();
+        for (String t : tiers) {
+            int idx = tierOrder.indexOf(t);
+            indices.add(idx >= 0 ? idx : 2); // 默认 "一般"
+        }
+        Collections.sort(indices);
+        int medianIdx = indices.get(indices.size() / 2);
+        return tierOrder.get(medianIdx);
+    }
+
+    private LlmClient resolveClient(Long configId) {
         if (configId != null && configId > 0) {
             AiConfig config = aiConfigService.getDetail(configId);
-            return aiClientFactory.getClient(config.getProvider());
+            return aiClientFactory.getLlmClient(config.getProvider());
         }
-        return aiClientFactory.getDefaultClient(ConfigType.LLM.getCode());
+        return aiClientFactory.getDefaultLlmClient();
     }
 }

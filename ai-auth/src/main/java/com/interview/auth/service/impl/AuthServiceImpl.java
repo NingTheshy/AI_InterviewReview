@@ -232,7 +232,8 @@ public class AuthServiceImpl implements AuthService {
 
         // 5. 更新登录信息
         user.setLastLoginAt(LocalDateTime.now());
-        user.setLoginCount(user.getLoginCount() + 1);
+        user.setLoginCount((user.getLoginCount() != null ? user.getLoginCount() : 0) + 1);
+//      user.setLoginCount(user.getLoginCount() + 1);
         userMapper.updateById(user);
 
         log.info("用户登录成功: {}", user.getUsername());
