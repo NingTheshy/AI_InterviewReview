@@ -155,6 +155,19 @@ class NoteServiceImplTest {
 
             verify(noteMapper).updateById(any(InterviewNote.class));
         }
+
+        @Test
+        @DisplayName("同一次面试的不同问题可以分别保存笔记")
+        void saveQuestionNote_DifferentQuestionsInsertIndependently() {
+            when(noteMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
+            when(noteMapper.insert(any(InterviewNote.class))).thenReturn(1);
+
+            noteService.saveQuestionNote(TEST_INTERVIEW_ID, 10L, TEST_USER_ID, "问题一笔记");
+            noteService.saveQuestionNote(TEST_INTERVIEW_ID, 11L, TEST_USER_ID, "问题二笔记");
+
+            verify(noteMapper).insert(argThat(note -> Long.valueOf(10L).equals(note.getQuestionId())));
+            verify(noteMapper).insert(argThat(note -> Long.valueOf(11L).equals(note.getQuestionId())));
+        }
     }
 
     // ==================== 边界条件测试 ====================

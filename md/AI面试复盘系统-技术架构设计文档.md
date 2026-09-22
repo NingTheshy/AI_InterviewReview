@@ -13,7 +13,7 @@
 | 技术 | 版本 | 说明 |
 |------|------|------|
 | Java | 17 LTS | 长期支持版本，Spring Boot 3.x 最低要求 |
-| Spring Boot | 3.2.5 | 主框架，提供自动配置、嵌入式服务器 |
+| Spring Boot | 3.5.15 | 主框架，提供自动配置、嵌入式服务器 |
 | Spring Security | 6.2.x | 安全框架，处理认证授权 |
 | Spring Web (MVC) | 6.1.x | Web 框架，RESTful API 支持 |
 | MyBatis-Plus | 3.5.5 | ORM 框架，简化 CRUD 操作 |
@@ -57,7 +57,7 @@
 <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.2.5</version>
+    <version>3.5.15</version>
 </parent>
 
 <properties>

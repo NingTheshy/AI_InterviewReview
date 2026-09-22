@@ -15,7 +15,7 @@ import java.nio.file.Path;
  * 音频预处理器
  * <p>
  * 将任意格式音频（mp3/wav/m4a/ogg/flac 等）转换为 16kHz 16bit 单声道 PCM WAV，
- * 供后续切片和 ASR 转录使用。
+ * 供 Fun-ASR 的说话人分离转写使用。
  * </p>
  * <p>
  * 实现策略：
@@ -74,6 +74,62 @@ public class AudioPreprocessor {
     }
 
     /**
+     * 为 Fun-ASR 生成完整的单声道 WAV 文件。
+     *
+     * <p>该方法完全基于文件流工作，不会把长音频加载到 JVM 堆内存。</p>
+     *
+     * @return 转换后音频时长（秒）
+     */
+    public double preprocessToMonoWav(Path inputFile, Path outputFile) {
+        String ffmpegPath = ffmpegResolver.resolve();
+        if (ffmpegPath == null) {
+            throw new BusinessException(ErrorCode.AI_MODEL_CALL_FAILED.getCode(),
+                    "未找到 FFmpeg，无法将 Fun-ASR 音频转换为单声道 WAV");
+        }
+
+        try {
+            Files.createDirectories(outputFile.toAbsolutePath().getParent());
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                    ffmpegPath,
+                    "-i", inputFile.toAbsolutePath().toString(),
+                    "-vn",
+                    "-ar", String.valueOf((int) TARGET_SAMPLE_RATE),
+                    "-ac", String.valueOf(TARGET_CHANNELS),
+                    "-sample_fmt", "s16",
+                    "-y",
+                    outputFile.toAbsolutePath().toString()
+            );
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+            String output = new String(process.getInputStream().readAllBytes());
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new BusinessException(ErrorCode.AI_MODEL_CALL_FAILED.getCode(),
+                        "FFmpeg 单声道转换失败: " + output);
+            }
+
+            try (AudioInputStream stream = AudioSystem.getAudioInputStream(outputFile.toFile())) {
+                AudioFormat format = stream.getFormat();
+                if (format.getFrameRate() <= 0 || stream.getFrameLength() <= 0) {
+                    throw new IOException("无法读取转换后音频时长");
+                }
+                double durationSeconds = stream.getFrameLength() / format.getFrameRate();
+                log.info("Fun-ASR 音频预处理完成: input={}, output={}, duration={}s",
+                        inputFile.getFileName(), outputFile.getFileName(), Math.round(durationSeconds));
+                return durationSeconds;
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.AI_MODEL_CALL_FAILED.getCode(), "FFmpeg 单声道转换被中断");
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.AI_MODEL_CALL_FAILED.getCode(),
+                    "Fun-ASR 音频预处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * WAV 文件预处理（纯 Java，零依赖）
      */
     private byte[] preprocessWav(byte[] wavBytes) throws UnsupportedAudioFileException, IOException {
@@ -118,7 +174,7 @@ public class AudioPreprocessor {
         if (ffmpegPath == null) {
             throw new BusinessException(ErrorCode.AI_MODEL_CALL_FAILED.getCode(),
                     "未找到 FFmpeg，无法处理 " + format + " 格式音频。"
-                            + "请安装 FFmpeg 并配置 ai.chunk.ffmpeg-path，或使用 WAV 格式上传。");
+                            + "请安装 FFmpeg 并配置 ai.funasr.ffmpeg-path，或使用 WAV 格式上传。");
         }
 
         Path tempDir = Files.createTempDirectory("audio_preprocess_");

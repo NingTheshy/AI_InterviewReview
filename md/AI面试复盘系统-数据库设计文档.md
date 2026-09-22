@@ -38,7 +38,7 @@
                      └────────────────┘
 
   ┌─────────────┐     ┌─────────────────┐
-  │interview_note│◀───│ interview 表     │  (面试笔记，1:1)
+  │interview_note│◀───│ interview 表     │  (面试笔记1:1，问题笔记1:N)
   └─────────────┘     └─────────────────┘
 
   ┌─────────────────────┐
@@ -130,7 +130,7 @@
 - 描述属性：title, company_name, position_title, industry, interview_type
 - 音频属性：audio_file_path, audio_file_size, audio_duration
 - 简历属性：resume_file_path, resume_text
-- 内容属性：jd_text, transcript_text
+- 内容属性：jd_text, transcript_text, transcript_segments（句子时间戳、speakerId、speakerRole）
 - 评分属性：overall_score, dimension_content/logic/expression/professional/communication
 - 建议属性：improvement_summary, strengths, weaknesses
 - 处理属性：status, processing_step, error_message, deleted
@@ -151,7 +151,7 @@
 - 关联属性：interview_id, user_id
 - 内容属性：note_content (富文本)
 - 类型属性：note_type (INTERVIEW-面试笔记 / QUESTION-问题笔记)
-- 关联属性：question_id (问题笔记时关联问题ID，面试笔记时为NULL)
+- 关联属性：question_id（问题笔记时关联真实问题ID，面试笔记固定为0）
 - 时间属性：created_at, updated_at
 
 **问题收藏 (InterviewFavorite)**
@@ -289,7 +289,7 @@ User (id, username, password, nickname, email, avatar, role, status,
 
 Interview (id, user_id, title, company_name, position_title, industry, interview_type,
            audio_file_path, audio_file_size, audio_duration,
-           resume_file_path, resume_text, jd_text, transcript_text,
+           resume_file_path, resume_text, jd_text, transcript_text, transcript_segments,
            overall_score, dimension_content, dimension_logic, dimension_expression,
            dimension_professional, dimension_communication,
            improvement_summary, strengths, weaknesses,
@@ -299,7 +299,7 @@ InterviewQuestion (id, interview_id, question_index, question_text, question_spe
                    answer_text, answer_speaker, start_time, end_time,
                    score, dimension_content, dimension_logic, dimension_expression,
                    dimension_professional,
-                   improvement_tip, reference_answer,
+                   improvement_tip, reference_answer, rubric_detail,
                    deleted, created_at, updated_at)
 
 InterviewNote (id, interview_id, user_id, note_content, note_type, question_id,
@@ -407,7 +407,7 @@ InterviewComment (id, share_id, user_id, content, deleted, created_at)
 | interview_question | idx_interview_id | interview_id | 普通索引 | 按面试记录查询问题 |
 | interview_question | idx_question_index | interview_id, question_index | 联合索引 | 按面试+序号查询 |
 | interview_note | PRIMARY | id | 主键 | 自增主键 |
-| interview_note | uk_interview_user | interview_id, user_id, note_type | 唯一索引 | 每场面试每种类型只能有一条笔记 |
+| interview_note | uk_note_scope | interview_id, user_id, note_type, question_id | 唯一索引 | 每场一条面试笔记，每个问题一条独立问题笔记 |
 | interview_note | idx_user_id | user_id | 普通索引 | 按用户查询笔记 |
 | interview_favorite | PRIMARY | id | 主键 | 自增主键 |
 | interview_favorite | uk_user_question | user_id, question_id | 唯一索引 | 同一用户不能重复收藏同一问题 |
@@ -507,17 +507,18 @@ CREATE TABLE `interview` (
     `resume_text` TEXT COMMENT '简历文本内容(系统从PDF提取)',
     `jd_text` TEXT COMMENT '岗位JD内容',
     `transcript_text` LONGTEXT COMMENT '完整转写文本',
-    `overall_score` DECIMAL(3,1) COMMENT '整体评分(1-10)',
-    `dimension_content` DECIMAL(3,1) COMMENT '内容质量评分',
-    `dimension_logic` DECIMAL(3,1) COMMENT '逻辑性评分',
-    `dimension_expression` DECIMAL(3,1) COMMENT '表达能力评分',
-    `dimension_professional` DECIMAL(3,1) COMMENT '专业度评分',
-    `dimension_communication` DECIMAL(3,1) COMMENT '沟通技巧评分',
+    `transcript_segments` LONGTEXT COMMENT '句子级转写结果(JSON，含speakerId、speakerRole和毫秒时间戳)',
+    `overall_score` INT COMMENT '整体评分(0-100)',
+    `dimension_content` INT COMMENT '内容质量评分(0-100)',
+    `dimension_logic` INT COMMENT '逻辑性评分(0-100)',
+    `dimension_expression` INT COMMENT '表达能力评分(0-100)',
+    `dimension_professional` INT COMMENT '专业度评分(0-100)',
+    `dimension_communication` INT COMMENT '沟通技巧评分(0-100)',
     `improvement_summary` TEXT COMMENT '整体改进建议',
     `strengths` TEXT COMMENT '优势总结',
     `weaknesses` TEXT COMMENT '待提升方面',
     `status` TINYINT DEFAULT 0 COMMENT '状态: 0-处理中 1-已完成 2-失败',
-    `processing_step` TINYINT DEFAULT 0 COMMENT '处理步骤: 0-未开始 1-语音转文字 2-问题识别 3-逐题评分 4-整体评分',
+    `processing_step` TINYINT DEFAULT 0 COMMENT '处理步骤: 0-未开始 1-FunASR转写 2-标准生成与比对 3-计分保存 4-整体总结',
     `error_message` TEXT COMMENT '失败原因',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -544,13 +545,14 @@ CREATE TABLE `interview_question` (
     `answer_speaker` VARCHAR(20) COMMENT '回答者角色: INTERVIEWER/CANDIDATE',
     `start_time` INT COMMENT '开始时间(秒)',
     `end_time` INT COMMENT '结束时间(秒)',
-    `score` DECIMAL(3,1) COMMENT '评分(1-10)',
-    `dimension_content` DECIMAL(3,1) COMMENT '内容质量评分',
-    `dimension_logic` DECIMAL(3,1) COMMENT '逻辑性评分',
-    `dimension_expression` DECIMAL(3,1) COMMENT '表达能力评分',
-    `dimension_professional` DECIMAL(3,1) COMMENT '专业度评分',
+    `score` INT COMMENT '评分(0-100)',
+    `dimension_content` INT COMMENT '内容质量评分(0-100)',
+    `dimension_logic` INT COMMENT '逻辑性评分(0-100)',
+    `dimension_expression` INT COMMENT '表达能力评分(0-100)',
+    `dimension_professional` INT COMMENT '专业度评分(0-100)',
     `improvement_tip` TEXT COMMENT '改进建议',
     `reference_answer` TEXT COMMENT '参考答案',
+    `rubric_detail` LONGTEXT COMMENT '评分量表与逐要点比对结果(JSON)',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -590,11 +592,11 @@ CREATE TABLE `interview_note` (
     `user_id` BIGINT NOT NULL COMMENT '用户ID',
     `note_content` LONGTEXT COMMENT '笔记内容(富文本)',
     `note_type` VARCHAR(20) NOT NULL COMMENT '笔记类型: INTERVIEW-面试笔记 QUESTION-问题笔记',
-    `question_id` BIGINT COMMENT '问题ID(问题笔记时必填)',
+    `question_id` BIGINT NOT NULL DEFAULT 0 COMMENT '问题ID(问题笔记时为真实ID，面试笔记为0)',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    UNIQUE INDEX `uk_interview_user` (`interview_id`, `user_id`, `note_type`),
+    UNIQUE INDEX `uk_note_scope` (`interview_id`, `user_id`, `note_type`, `question_id`),
     INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试笔记表';
 ```
@@ -844,17 +846,18 @@ mybatis-plus:
 | interview | resume_text | TEXT | 否 | NULL | 简历文本内容(系统从PDF提取) |
 | interview | jd_text | TEXT | 否 | NULL | 岗位JD内容 |
 | interview | transcript_text | LONGTEXT | 否 | NULL | 完整转写文本 |
-| interview | overall_score | DECIMAL(3,1) | 否 | NULL | 整体评分(1-10) |
-| interview | dimension_content | DECIMAL(3,1) | 否 | NULL | 内容质量评分 |
-| interview | dimension_logic | DECIMAL(3,1) | 否 | NULL | 逻辑性评分 |
-| interview | dimension_expression | DECIMAL(3,1) | 否 | NULL | 表达能力评分 |
-| interview | dimension_professional | DECIMAL(3,1) | 否 | NULL | 专业度评分 |
-| interview | dimension_communication | DECIMAL(3,1) | 否 | NULL | 沟通技巧评分 |
+| interview | transcript_segments | LONGTEXT | 否 | NULL | 句子级转写JSON，含speakerId、speakerRole和毫秒时间戳 |
+| interview | overall_score | INT | 否 | NULL | 整体评分(0-100) |
+| interview | dimension_content | INT | 否 | NULL | 内容质量评分(0-100) |
+| interview | dimension_logic | INT | 否 | NULL | 逻辑性评分(0-100) |
+| interview | dimension_expression | INT | 否 | NULL | 表达能力评分(0-100) |
+| interview | dimension_professional | INT | 否 | NULL | 专业度评分(0-100) |
+| interview | dimension_communication | INT | 否 | NULL | 沟通技巧评分(0-100) |
 | interview | improvement_summary | TEXT | 否 | NULL | 整体改进建议 |
 | interview | strengths | TEXT | 否 | NULL | 优势总结 |
 | interview | weaknesses | TEXT | 否 | NULL | 待提升方面 |
 | interview | status | TINYINT | 否 | 0 | 状态: 0-处理中 1-已完成 2-失败 |
-| interview | processing_step | TINYINT | 否 | 0 | 处理步骤: 0-未开始 1-语音转文字 2-问题识别 3-逐题评分 4-整体评分 |
+| interview | processing_step | TINYINT | 否 | 0 | 处理步骤: 0-未开始 1-FunASR转写 2-标准生成与比对 3-计分保存 4-整体总结 |
 | interview | error_message | TEXT | 否 | NULL | 失败原因 |
 | interview | deleted | TINYINT | 否 | 0 | 逻辑删除 |
 | interview | created_at | DATETIME | 否 | CURRENT_TIMESTAMP | 创建时间 |
@@ -868,13 +871,14 @@ mybatis-plus:
 | interview_question | answer_speaker | VARCHAR(20) | 否 | NULL | 回答者角色 |
 | interview_question | start_time | INT | 否 | NULL | 开始时间(秒) |
 | interview_question | end_time | INT | 否 | NULL | 结束时间(秒) |
-| interview_question | score | DECIMAL(3,1) | 否 | NULL | 评分(1-10) |
-| interview_question | dimension_content | DECIMAL(3,1) | 否 | NULL | 内容质量评分 |
-| interview_question | dimension_logic | DECIMAL(3,1) | 否 | NULL | 逻辑性评分 |
-| interview_question | dimension_expression | DECIMAL(3,1) | 否 | NULL | 表达能力评分 |
-| interview_question | dimension_professional | DECIMAL(3,1) | 否 | NULL | 专业度评分 |
+| interview_question | score | INT | 否 | NULL | 评分(0-100) |
+| interview_question | dimension_content | INT | 否 | NULL | 内容质量评分(0-100) |
+| interview_question | dimension_logic | INT | 否 | NULL | 逻辑性评分(0-100) |
+| interview_question | dimension_expression | INT | 否 | NULL | 表达能力评分(0-100) |
+| interview_question | dimension_professional | INT | 否 | NULL | 专业度评分(0-100) |
 | interview_question | improvement_tip | TEXT | 否 | NULL | 改进建议 |
 | interview_question | reference_answer | TEXT | 否 | NULL | 参考答案 |
+| interview_question | rubric_detail | LONGTEXT | 否 | NULL | 评分量表与逐要点比对结果JSON |
 | interview_question | deleted | TINYINT | 否 | 0 | 逻辑删除 |
 | interview_question | created_at | DATETIME | 否 | CURRENT_TIMESTAMP | 创建时间 |
 | interview_question | updated_at | DATETIME | 否 | CURRENT_TIMESTAMP | 更新时间 |
@@ -883,7 +887,7 @@ mybatis-plus:
 | interview_note | user_id | BIGINT | 是 | - | 用户ID |
 | interview_note | note_content | LONGTEXT | 否 | NULL | 笔记内容(富文本) |
 | interview_note | note_type | VARCHAR(20) | 是 | - | 笔记类型: INTERVIEW/QUESTION |
-| interview_note | question_id | BIGINT | 否 | NULL | 问题ID(问题笔记时必填) |
+| interview_note | question_id | BIGINT | 是 | 0 | 问题ID(问题笔记为真实ID，面试笔记为0) |
 | interview_note | deleted | TINYINT | 否 | 0 | 逻辑删除 |
 | interview_note | created_at | DATETIME | 否 | CURRENT_TIMESTAMP | 创建时间 |
 | interview_note | updated_at | DATETIME | 否 | CURRENT_TIMESTAMP | 更新时间 |
@@ -953,10 +957,10 @@ mybatis-plus:
 | 值 | 说明 |
 |----|------|
 | 0 | 未开始 |
-| 1 | 语音转文字 |
-| 2 | 问题边界识别 |
-| 3 | 逐题评分 |
-| 4 | 整体评分 |
+| 1 | FunASR转写与说话人识别 |
+| 2 | 标准答案生成与逐项比对 |
+| 3 | 服务端计分与结果保存 |
+| 4 | 整体评分与总结 |
 
 **interview.interview_type:**
 | 值 | 说明 |
@@ -1046,17 +1050,18 @@ CREATE TABLE IF NOT EXISTS `interview` (
     `resume_text`             TEXT            DEFAULT NULL                COMMENT '简历文本内容(系统从PDF提取)',
     `jd_text`                 TEXT            DEFAULT NULL                COMMENT '岗位JD内容',
     `transcript_text`         LONGTEXT        DEFAULT NULL                COMMENT '完整转写文本',
-    `overall_score`           DECIMAL(3,1)    DEFAULT NULL                COMMENT '整体评分(1-10)',
-    `dimension_content`       DECIMAL(3,1)    DEFAULT NULL                COMMENT '内容质量评分',
-    `dimension_logic`         DECIMAL(3,1)    DEFAULT NULL                COMMENT '逻辑性评分',
-    `dimension_expression`    DECIMAL(3,1)    DEFAULT NULL                COMMENT '表达能力评分',
-    `dimension_professional`  DECIMAL(3,1)    DEFAULT NULL                COMMENT '专业度评分',
-    `dimension_communication` DECIMAL(3,1)    DEFAULT NULL                COMMENT '沟通技巧评分',
+    `transcript_segments`     LONGTEXT        DEFAULT NULL                COMMENT '句子级转写结果(JSON，含speakerId、speakerRole和毫秒时间戳)',
+    `overall_score`           INT             DEFAULT NULL                COMMENT '整体评分(0-100)',
+    `dimension_content`       INT             DEFAULT NULL                COMMENT '内容质量评分(0-100)',
+    `dimension_logic`         INT             DEFAULT NULL                COMMENT '逻辑性评分(0-100)',
+    `dimension_expression`    INT             DEFAULT NULL                COMMENT '表达能力评分(0-100)',
+    `dimension_professional`  INT             DEFAULT NULL                COMMENT '专业度评分(0-100)',
+    `dimension_communication` INT             DEFAULT NULL                COMMENT '沟通技巧评分(0-100)',
     `improvement_summary`     TEXT            DEFAULT NULL                COMMENT '整体改进建议',
     `strengths`               TEXT            DEFAULT NULL                COMMENT '优势总结',
     `weaknesses`              TEXT            DEFAULT NULL                COMMENT '待提升方面',
     `status`                  TINYINT         DEFAULT 0                   COMMENT '状态: 0-处理中 1-已完成 2-失败',
-    `processing_step`         TINYINT         DEFAULT 0                   COMMENT '处理步骤: 0-未开始 1-语音转文字 2-问题识别 3-逐题评分 4-整体评分',
+    `processing_step`         TINYINT         DEFAULT 0                   COMMENT '处理步骤: 0-未开始 1-FunASR转写 2-标准生成与比对 3-计分保存 4-整体总结',
     `error_message`           TEXT            DEFAULT NULL                COMMENT '失败原因',
     `deleted`                 TINYINT         DEFAULT 0                   COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at`              DATETIME        DEFAULT CURRENT_TIMESTAMP   COMMENT '创建时间',
@@ -1082,13 +1087,14 @@ CREATE TABLE IF NOT EXISTS `interview_question` (
     `answer_speaker`        VARCHAR(20)     DEFAULT NULL                COMMENT '回答者角色: INTERVIEWER/CANDIDATE',
     `start_time`            INT             DEFAULT NULL                COMMENT '开始时间(秒)',
     `end_time`              INT             DEFAULT NULL                COMMENT '结束时间(秒)',
-    `score`                 DECIMAL(3,1)    DEFAULT NULL                COMMENT '评分(1-10)',
-    `dimension_content`     DECIMAL(3,1)    DEFAULT NULL                COMMENT '内容质量评分',
-    `dimension_logic`       DECIMAL(3,1)    DEFAULT NULL                COMMENT '逻辑性评分',
-    `dimension_expression`  DECIMAL(3,1)    DEFAULT NULL                COMMENT '表达能力评分',
-    `dimension_professional` DECIMAL(3,1)   DEFAULT NULL                COMMENT '专业度评分',
+    `score`                 INT             DEFAULT NULL                COMMENT '评分(0-100)',
+    `dimension_content`     INT             DEFAULT NULL                COMMENT '内容质量评分(0-100)',
+    `dimension_logic`       INT             DEFAULT NULL                COMMENT '逻辑性评分(0-100)',
+    `dimension_expression`  INT             DEFAULT NULL                COMMENT '表达能力评分(0-100)',
+    `dimension_professional` INT            DEFAULT NULL                COMMENT '专业度评分(0-100)',
     `improvement_tip`       TEXT            DEFAULT NULL                COMMENT '改进建议',
     `reference_answer`      TEXT            DEFAULT NULL                COMMENT '参考答案',
+    `rubric_detail`         LONGTEXT        DEFAULT NULL                COMMENT '评分量表与逐要点比对结果(JSON)',
     `deleted`               TINYINT         DEFAULT 0                   COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at`            DATETIME        DEFAULT CURRENT_TIMESTAMP   COMMENT '创建时间',
     `updated_at`            DATETIME        DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -1126,11 +1132,11 @@ CREATE TABLE IF NOT EXISTS `interview_note` (
     `user_id`       BIGINT          NOT NULL                    COMMENT '用户ID',
     `note_content`  LONGTEXT        DEFAULT NULL                COMMENT '笔记内容(富文本)',
     `note_type`     VARCHAR(20)     NOT NULL                    COMMENT '笔记类型: INTERVIEW-面试笔记 QUESTION-问题笔记',
-    `question_id`   BIGINT          DEFAULT NULL                COMMENT '问题ID(问题笔记时必填)',
+    `question_id`   BIGINT          NOT NULL DEFAULT 0          COMMENT '问题ID(问题笔记时为真实ID，面试笔记为0)',
     `deleted`       TINYINT         DEFAULT 0                   COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at`    DATETIME        DEFAULT CURRENT_TIMESTAMP   COMMENT '创建时间',
     `updated_at`    DATETIME        DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    UNIQUE INDEX `uk_interview_user` (`interview_id`, `user_id`, `note_type`),
+    UNIQUE INDEX `uk_note_scope` (`interview_id`, `user_id`, `note_type`, `question_id`),
     INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试笔记表';
 

@@ -1,35 +1,44 @@
-# AI 面试复盘系统 - 后端
+# AI 面试复盘系统（后端）
 
-基于 Spring Boot 3.2.5 的多模块面试复盘平台后端，提供面试录音上传、AI 智能分析评分、面经分享等功能。
+基于 Spring Boot 3 的多模块后端服务。用户上传面试录音、简历和岗位描述后，系统使用 FunASR 完成句子级转写与说话人分离，再使用 Spring AI 驱动的文本模型生成标准答案、逐项比对候选人回答，并输出可回放、可解释的复盘结果。
+
+## 核心能力
+
+- 面试音频、简历 PDF 与岗位 JD 上传，异步处理并提供进度查询与重试。
+- FunASR 非实时整段转写：保留每句话的毫秒级时间戳和 `speakerId`，再根据问答识别映射为“面试官 / 候选人”。
+- 标准答案量表评分：先生成或复用满分标准，再按评分要点比对回答；分数由服务端根据固定权重计算。
+- 面试整体笔记一条、问题笔记按问题分别保存；支持收藏、分享、面经广场、评论和管理员审核。
+- JWT + Redis 黑名单认证、RBAC、文件所有权校验，以及供 FunASR 拉取音频的短时 HMAC 签名 URL。
 
 ## 技术栈
 
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Java | 17 | LTS 版本 |
-| Spring Boot | 3.2.5 | 基础框架 |
-| Spring Security | 6.2.x | 认证授权 |
-| MyBatis-Plus | 3.5.5 | ORM 框架 |
-| Druid | 1.2.21 | 数据库连接池 |
-| Redis | - | Token 黑名单 / 缓存 |
-| MySQL | 8.0+ | 数据库 |
-| Knife4j | 4.4.0 | API 文档 |
-| JJWT | 0.12.5 | JWT 令牌 |
-| Apache PDFBox | 3.0.1 | 简历 PDF 解析 |
+| 技术 | 版本 / 说明 |
+|---|---|
+| Java | 17 |
+| Spring Boot | 3.5.15 |
+| Spring AI | 1.1.8；DeepSeek 与 OpenAI 兼容协议文本模型适配 |
+| Spring WebFlux | AI 服务 HTTP 客户端 |
+| FunASR（DashScope） | 非实时语音转写与说话人分离 |
+| Spring Security | JWT、RBAC、CORS |
+| MyBatis-Plus / Druid | 数据访问与连接池 |
+| MySQL / Redis | 业务数据、Token 黑名单与缓存 |
+| Knife4j / OpenAPI | 接口文档 |
+| Apache PDFBox | 简历 PDF 文本提取 |
 
 ## 项目结构
 
-```
+```text
 AI_InterviewReview/
-├── ai-common          # 公共模块：常量、工具类、异常处理、实体基类
-├── ai-auth            # 认证模块：注册、登录、JWT、RBAC
-├── ai-interview       # 面试模块：上传、评分、分享、面经、笔记、收藏
-├── ai-admin           # 管理模块：用户管理、面经管理、评论管理、统计
-├── ai-ai              # AI 模块：多模型配置、语音转文字、智能评分
-├── ai-web             # 启动模块：应用入口、配置文件
-├── sql/               # 数据库建表脚本
-├── docs/              # 设计文档
-└── pom.xml            # 父 POM
+├── ai-common/       # 公共常量、统一响应、异常、JWT、文件与签名工具
+├── ai-auth/         # 注册、登录、JWT 过滤器、用户资料与权限
+├── ai-ai/           # Spring AI、FunASR、音频预处理、评分量表与模型工厂
+├── ai-interview/    # 面试上传、异步复盘、笔记、收藏、分享、面经和评论
+├── ai-admin/        # 用户、面经、评论、面试和统计管理
+├── ai-web/          # Spring Boot 启动模块与运行配置
+├── sql/             # 新建库脚本与增量升级脚本
+├── md/              # 需求、数据库、架构和代码注释规范文档
+├── .env.example     # 环境变量模板（唯一格式来源）
+└── pom.xml          # Maven 父工程
 ```
 
 ## 快速开始
@@ -40,207 +49,120 @@ AI_InterviewReview/
 - Maven 3.8+
 - MySQL 8.0+
 - Redis 6.0+
+- FFmpeg（使用 FunASR 时需要，用于转换为单声道 WAV）
 
-### 1. 克隆项目
+### 1. 初始化数据库
 
-```bash
-git clone https://github.com/NingTheshy/AI_InterviewReview.git
-cd AI_InterviewReview
-```
-
-### 2. 初始化数据库
+新建数据库直接执行：
 
 ```bash
 mysql -u root -p < sql/schema.sql
 ```
 
-### 3. 配置环境变量
+已有旧版本数据库按历史版本执行相应升级脚本；当前版本涉及以下两项：
 
-复制环境变量模板并填入实际值：
+```bash
+mysql -u root -p ai_interview < sql/upgrade_rubric_scoring.sql
+mysql -u root -p ai_interview < sql/upgrade_transcript_timestamps_and_notes.sql
+```
+
+第二个脚本会新增句子级转写字段，并将笔记唯一范围升级为：
+
+```text
+(interview_id, user_id, note_type, question_id)
+```
+
+### 2. 配置环境变量
+
+严格以 [`.env.example`](.env.example) 为模板创建本地 `.env`，不要提交 `.env`：
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，配置数据库、Redis、JWT 密钥和 AI API Key：
+至少填写数据库、Redis、JWT 和实际使用的模型密钥。生产环境使用 FunASR 时，`FUNASR_PUBLIC_BASE_URL` 必须是 DashScope 能从互联网访问的 HTTPS 地址，不能是 `localhost`；开发测试可先不配置并避免调用真实 FunASR。
 
 ```env
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=ai_interview
-DB_USERNAME=root
-DB_PASSWORD=your_password
-
-REDIS_HOST=localhost
-REDIS_PORT=6379
+DB_PASSWORD=your_database_password
 REDIS_PASSWORD=your_redis_password
-
-JWT_SECRET=your_256_bit_secret_key
-
+JWT_SECRET=your_256_bit_secret_key_here
 DEEPSEEK_API_KEY=your_deepseek_api_key
-OPENAI_API_KEY=your_openai_api_key
-WHISPER_API_KEY=your_whisper_api_key
-XIAOMI_API_KEY=your_xiaomi_api_key
 FUNASR_API_KEY=your_funasr_api_key
+FUNASR_PUBLIC_BASE_URL=https://api.example.com
+FUNASR_FILE_URL_SECRET=replace_with_a_long_random_secret
 ```
 
-### 4. 编译运行
+### 3. 编译、测试与启动
+
+通用 Maven 命令：
 
 ```bash
-mvn clean compile
-mvn spring-boot:run -pl ai-web
+mvn -s .mvn-settings.xml clean test
+mvn -s .mvn-settings.xml spring-boot:run -pl ai-web
 ```
 
-应用默认启动在 `http://localhost:8080`。
+本项目在 Windows 的指定 Maven 与本地仓库环境可使用：
 
-### 5. 切换环境
-
-通过 `SPRING_PROFILES_ACTIVE` 环境变量切换：
-
-- `dev` - 开发环境（默认）
-- `test` - 测试环境
-- `prod` - 生产环境
-
-## API 接口
-
-启动后访问 Knife4j 文档：`http://localhost:8080/swagger-ui.html`
-
-### 认证模块 `/auth`
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/auth/send-code` | 发送邮箱验证码 |
-| POST | `/auth/register` | 用户注册 |
-| POST | `/auth/login` | 用户登录 |
-| POST | `/auth/logout` | 退出登录 |
-| GET | `/auth/profile` | 获取当前用户信息 |
-| PUT | `/auth/password` | 修改密码 |
-| PUT | `/auth/profile` | 更新用户信息 |
-
-### 面试模块 `/interviews`
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/interviews/upload` | 上传面试（音频+简历+JD） |
-| GET | `/interviews` | 获取面试列表（分页、筛选、排序） |
-| GET | `/interviews/{id}` | 获取面试详情 |
-| DELETE | `/interviews/{id}` | 删除面试记录 |
-| GET | `/interviews/{id}/status` | 查询处理进度 |
-| POST | `/interviews/{id}/retry` | 重新处理失败的面试 |
-
-### 笔记模块
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/interviews/{id}/note` | 获取面试笔记 |
-| PUT | `/interviews/{id}/note` | 保存面试笔记 |
-| GET | `/interviews/{id}/questions/{qid}/note` | 获取问题笔记 |
-| PUT | `/interviews/{id}/questions/{qid}/note` | 保存问题笔记 |
-
-### 分享与面经
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/interviews/{id}/share` | 生成分享链接/发布面经 |
-| GET | `/interviews/{id}/shares` | 获取分享记录 |
-| DELETE | `/shares/{token}` | 撤销分享 |
-| PUT | `/shares/{token}/public` | 切换面经公开状态 |
-| GET | `/share/{token}` | 访问分享页面 |
-| GET | `/experiences` | 面经广场列表（公开） |
-| GET | `/experiences/{token}` | 面经详情 |
-
-### 评论模块
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/experiences/{token}/comments` | 获取评论列表 |
-| POST | `/experiences/{token}/comments` | 发表评论 |
-| DELETE | `/comments/{id}` | 删除评论 |
-
-### 收藏模块 `/favorites`
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/favorites` | 收藏问题 |
-| DELETE | `/favorites/{id}` | 取消收藏 |
-| GET | `/favorites` | 获取收藏列表 |
-
-### 文件下载
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/files/{filename}` | 文件/音频下载（支持 Range 分段） |
-
-### 管理后台 `/admin` (需要 ADMIN 角色)
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/admin/users` | 用户列表 |
-| GET | `/admin/users/{id}` | 用户详情 |
-| PUT | `/admin/users/{id}/status` | 启用/禁用用户 |
-| PUT | `/admin/users/{id}/role` | 修改用户角色 |
-| GET | `/admin/stats/overview` | 系统统计概览 |
-| GET | `/admin/experiences` | 面经列表 |
-| PUT | `/admin/experiences/{token}/status` | 下架/恢复面经 |
-| GET | `/admin/comments` | 评论列表 |
-| DELETE | `/admin/comments/{id}` | 删除评论 |
-| GET | `/admin/interviews` | 面试列表 |
-
-### AI 配置管理 `/ai-configs` (需要 ADMIN 角色)
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/ai-configs` | AI 配置列表 |
-| GET | `/ai-configs/{id}` | 配置详情 |
-| POST | `/ai-configs` | 新增配置 |
-| PUT | `/ai-configs/{id}` | 更新配置 |
-| DELETE | `/ai-configs/{id}` | 删除配置 |
-| PUT | `/ai-configs/{id}/default` | 设为默认 |
-
-## 核心功能
-
-### AI 面试分析流程
-
-1. **上传面试材料** - 用户上传音频文件（MP3/WAV）、简历 PDF、岗位 JD
-2. **语音转文字** - 通过 Whisper / FunASR 进行语音识别
-3. **问题边界识别** - AI 识别面试中的问答对
-4. **逐题评分** - 从内容质量、逻辑性、表达能力、专业度四个维度评分
-5. **整体评估** - 生成整体评分、优势总结、改进建议
-
-### 支持的 AI 服务
-
-| 服务 | 用途 |
-|------|------|
-| DeepSeek | 文本分析与评分 |
-| OpenAI GPT-4o | 文本分析与评分 |
-| OpenAI Whisper | 语音转文字 |
-| 小米 MIMO-V2.5 | 文本分析与评分 |
-| 阿里云 FunASR | 实时语音识别 |
-
-可通过管理后台 `/ai-configs` 动态切换 AI 模型。
-
-### 安全特性
-
-- JWT 认证 + Token 黑名单（Redis）
-- BCrypt 密码加密
-- 登录失败锁定（5 次失败锁定 15 分钟）
-- RBAC 角色权限控制（普通用户 / 管理员）
-- 文件上传校验（音频 MP3/WAV 最大 200MB，简历 PDF 最大 20MB）
-- 管理员自我保护（不可自我降级/禁用）
-
-## 测试
-
-```bash
-# 运行所有测试
-mvn test
-
-# 运行单个模块测试
-mvn test -pl ai-common
-mvn test -pl ai-auth
-mvn test -pl ai-interview
-mvn test -pl ai-admin
-mvn test -pl ai-ai
+```powershell
+& 'D:\Maven\apache-maven-3.8.4\bin\mvn.cmd' -s '.mvn-settings.xml' test
+& 'D:\Maven\apache-maven-3.8.4\bin\mvn.cmd' -s '.mvn-settings.xml' spring-boot:run -pl ai-web
 ```
+
+服务默认地址：`http://localhost:8080`。
+
+接口文档：`http://localhost:8080/swagger-ui.html`。
+
+## AI 复盘处理流程
+
+```text
+上传音频、简历、JD
+        ↓
+FunASR：整段单声道 WAV 转写 + 句子时间戳 + speakerId
+        ↓
+公司分级、问答识别、speakerId 角色映射
+        ↓
+生成或复用满分标准（量表）
+        ↓
+逐要点比对回答，服务端根据权重计算得分
+        ↓
+保存问题评分、角色化转写、整体评分和改进建议
+```
+
+处理状态依次为：FunASR 转写与说话人识别、标准答案生成与逐项比对、服务端计分与结果保存、整体评分与总结。历史面试只有重新处理后才会生成句子级转写和角色信息。
+
+## 接口概览
+
+项目共定义 **48 条业务 HTTP 路由**：普通业务与用户接口 31 条、管理员接口 16 条、FunASR 签名音频访问接口 1 条。Swagger、Knife4j 与 Druid 等基础设施地址不计入该数字。
+
+| 分类 | 路径前缀 | 数量 | 说明 |
+|---|---|---:|---|
+| 认证与用户 | `/auth` | 7 | 注册、登录、验证码、资料、密码与退出登录 |
+| 面试与笔记 | `/interviews` | 10 | 上传、列表、详情、状态、重试、整体/问题笔记 |
+| 分享与面经 | `/share`、`/shares`、`/experiences` | 7 | 分享创建、公开状态、面经浏览 |
+| 评论与收藏 | `/comments`、`/favorites` | 6 | 评论 CRUD、问题或面试收藏 |
+| 文件 | `/files`、`/asr-files` | 2 | 用户文件 Range 下载、FunASR 短时签名下载 |
+| AI 配置 | `/ai-configs` | 6 | 管理员维护模型配置与默认项 |
+| 管理后台 | `/admin/**` | 10 | 用户、统计、面试、面经和评论管理 |
+
+认证接口中的登录、注册和验证码发送公开；公开面经浏览及公开分享无需登录。`/asr-files/**` 不用于普通前端访问，专供 DashScope 通过 HMAC 短时签名读取音频。
+
+## 安全边界
+
+- JWT 认证，Redis Token 黑名单，以及数据库实时角色和账户状态校验。
+- 普通用户只能访问自己上传的文件、面试、笔记和分享记录。
+- FunASR 不携带用户 JWT，因此使用文件名与过期时间共同签名的 HMAC URL，且服务端拒绝路径穿越。
+- API Key、JWT 密钥和数据库密码仅放在 `.env` 或部署环境变量中；`.env` 已被 Git 忽略。
+
+## 文档
+
+- [需求文档](md/AI面试复盘系统-需求文档.md)
+- [数据库设计文档](md/AI面试复盘系统-数据库设计文档.md)
+- [技术架构设计文档](md/AI面试复盘系统-技术架构设计文档.md)
+- [代码注释规范](md/代码注释规范.md)
+
+## 验证
+
+当前全量测试结果：**313 tests，0 failures，0 errors**。
 
 ## License
 

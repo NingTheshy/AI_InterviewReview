@@ -1,99 +1,62 @@
 package com.interview.interview.controller;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
-import org.springframework.http.*;
-import org.springframework.web.bind.annotation.*;
+import com.interview.common.utils.SecurityUtils;
+import com.interview.interview.service.FileService;
+import com.interview.interview.service.FileService.FileDownload;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import java.io.RandomAccessFile;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
-@Slf4j
+/**
+ * 文件流式下载入口。
+ *
+ * <p>{@code /files/**} 面向已登录的文件所有者，{@code /asr-files/**} 面向无法携带 JWT 的 Fun-ASR。
+ * 两者的授权与路径校验均下沉到 {@link FileService}，控制器只负责转换为 HTTP Range 响应。</p>
+ */
 @RestController
+@RequiredArgsConstructor
 public class FileController {
 
-    @Value("${interview.file.upload-dir:./uploads}")
-    private String uploadDir;
+    private final FileService fileService;
 
+    /** 返回当前用户拥有的音频或简历文件，支持单区间断点读取。 */
     @GetMapping("/files/{filename:.+}")
-    public ResponseEntity<?> serveFile(
+    public ResponseEntity<StreamingResponseBody> serveFile(
             @PathVariable String filename,
-            @RequestHeader(value = "Range", required = false) String rangeHeader) throws java.io.IOException {
-        if (filename.contains("..") || filename.contains("\\")
-                || filename.contains("/") || filename.contains("\0")) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        Path filePath = Paths.get(uploadDir, filename).normalize();
-        if (!filePath.startsWith(Paths.get(uploadDir).normalize())) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        Resource resource = new FileSystemResource(filePath);
-        if (!resource.exists()) {
-            return ResponseEntity.notFound().build();
-        }
-
-        String contentType = determineContentType(filename);
-        long fileLength = resource.contentLength();
-
-        // 支持 HTTP Range 请求（音频 seek）
-        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
-            try {
-                String rangeSpec = rangeHeader.substring(6);
-                String[] parts = rangeSpec.split("-");
-                long start = Long.parseLong(parts[0]);
-                long end = parts.length > 1 && !parts[1].isEmpty()
-                        ? Long.parseLong(parts[1])
-                        : fileLength - 1;
-
-                if (start >= fileLength || end >= fileLength || start > end) {
-                    return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE).build();
-                }
-
-                long contentLength = end - start + 1;
-                byte[] data = new byte[(int) contentLength];
-                try (RandomAccessFile raf = new RandomAccessFile(filePath.toFile(), "r")) {
-                    raf.seek(start);
-                    raf.read(data, 0, (int) contentLength);
-                }
-
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.parseMediaType(contentType));
-                headers.set("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
-                headers.setContentLength(contentLength);
-                headers.set("Accept-Ranges", "bytes");
-                headers.set(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"");
-
-                return new ResponseEntity<>(data, headers, HttpStatus.PARTIAL_CONTENT);
-            } catch (Exception e) {
-                log.warn("Range 请求处理失败: {}", rangeHeader, e);
-                // 回退到完整文件返回
-            }
-        }
-
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
-                .header("Accept-Ranges", "bytes")
-                .contentLength(fileLength)
-                .body(resource);
+            @RequestHeader(value = "Range", required = false) String rangeHeader) {
+        return toResponse(fileService.prepareUserDownload(filename,
+                SecurityUtils.getCurrentUserId(), rangeHeader));
     }
 
-    private String determineContentType(String filename) {
-        String lower = filename.toLowerCase();
-        if (lower.endsWith(".wav")) return "audio/wav";
-        if (lower.endsWith(".mp3")) return "audio/mpeg";
-        if (lower.endsWith(".m4a")) return "audio/mp4";
-        if (lower.endsWith(".ogg")) return "audio/ogg";
-        if (lower.endsWith(".flac")) return "audio/flac";
-        if (lower.endsWith(".pdf")) return "application/pdf";
-        if (lower.endsWith(".doc")) return "application/msword";
-        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-        return "application/octet-stream";
+    /** 返回短时 HMAC 签名授权的完整音频，供 DashScope 拉取转写源文件。 */
+    @GetMapping("/asr-files/{filename:.+}")
+    public ResponseEntity<StreamingResponseBody> serveAsrFile(
+            @PathVariable String filename,
+            @RequestParam long expires,
+            @RequestParam String token) {
+        return toResponse(fileService.prepareAsrDownload(filename, expires, token));
+    }
+
+    /** 将已授权的文件描述转换为 RFC 7233 单区间流式响应。 */
+    private ResponseEntity<StreamingResponseBody> toResponse(FileDownload download) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(download.contentType());
+        headers.setContentLength(download.length());
+        headers.set(HttpHeaders.ACCEPT_RANGES, "bytes");
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + download.filename() + "\"");
+        if (download.partial()) {
+            headers.set(HttpHeaders.CONTENT_RANGE, "bytes " + download.start() + "-"
+                    + download.end() + "/" + download.fileSize());
+        }
+        StreamingResponseBody body = output -> fileService.copy(download, output);
+        return new ResponseEntity<>(body, headers,
+                download.partial() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK);
     }
 }

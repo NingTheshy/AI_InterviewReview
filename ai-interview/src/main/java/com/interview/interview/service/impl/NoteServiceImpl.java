@@ -28,6 +28,8 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class NoteServiceImpl implements NoteService {
 
+    private static final long INTERVIEW_NOTE_QUESTION_SCOPE = 0L;
+
     private final InterviewNoteMapper noteMapper;
 
     /**
@@ -42,6 +44,7 @@ public class NoteServiceImpl implements NoteService {
         wrapper.eq(InterviewNote::getInterviewId, interviewId);
         wrapper.eq(InterviewNote::getUserId, userId);
         wrapper.eq(InterviewNote::getNoteType, NoteType.INTERVIEW.getCode());
+        wrapper.eq(InterviewNote::getQuestionId, INTERVIEW_NOTE_QUESTION_SCOPE);
 
         InterviewNote note = noteMapper.selectOne(wrapper);
         return note != null ? note.getNoteContent() : "";
@@ -59,6 +62,7 @@ public class NoteServiceImpl implements NoteService {
         wrapper.eq(InterviewNote::getInterviewId, interviewId);
         wrapper.eq(InterviewNote::getUserId, userId);
         wrapper.eq(InterviewNote::getNoteType, NoteType.INTERVIEW.getCode());
+        wrapper.eq(InterviewNote::getQuestionId, INTERVIEW_NOTE_QUESTION_SCOPE);
 
         InterviewNote note = noteMapper.selectOne(wrapper);
 
@@ -67,6 +71,7 @@ public class NoteServiceImpl implements NoteService {
             note.setInterviewId(interviewId);
             note.setUserId(userId);
             note.setNoteType(NoteType.INTERVIEW.getCode());
+            note.setQuestionId(INTERVIEW_NOTE_QUESTION_SCOPE);
             note.setNoteContent(content);
             noteMapper.insert(note);
         } else {

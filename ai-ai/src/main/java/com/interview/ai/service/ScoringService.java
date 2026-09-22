@@ -1,5 +1,7 @@
 package com.interview.ai.service;
 
+import java.util.List;
+
 /**
  * AI 评分服务接口
  * <p>
@@ -8,6 +10,13 @@ package com.interview.ai.service;
  * </p>
  */
 public interface ScoringService {
+
+    record SavedRubric(String questionText, String referenceAnswer, String rubricDetail) {}
+
+    /** 先生成满分标准和量表，再逐项比对并由服务端计算分数。 */
+    String analyzeWithRubric(String text, String jdText, String resumeText,
+                             String positionTitle, String industry, Integer companyTier, Long configId,
+                             List<SavedRubric> savedRubrics);
 
     /**
      * 单次评估：一次性返回所有问题的评分结果

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -73,5 +74,17 @@ class FileUtilTest {
         Path result = FileUtil.saveFile(file, tempDir.toString(), "saved.mp3");
         assertNotNull(result);
         assertTrue(result.toFile().exists());
+    }
+
+    @Test
+    void saveFile_rejectsTraversalAndOverwrite() throws IOException {
+        MockMultipartFile file = new MockMultipartFile(
+                "audio", "test.mp3", "audio/mpeg", new byte[4]);
+        assertThrows(IOException.class,
+                () -> FileUtil.saveFile(file, tempDir.toString(), "../outside.mp3"));
+        Path saved = FileUtil.saveFile(file, tempDir.toString(), "saved.mp3");
+        assertThrows(java.nio.file.FileAlreadyExistsException.class,
+                () -> FileUtil.saveFile(file, tempDir.toString(), "saved.mp3"));
+        assertEquals(4, Files.size(saved));
     }
 }

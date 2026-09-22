@@ -1,5 +1,7 @@
 package com.interview.ai.service;
 
+import com.interview.ai.dto.TranscriptionResult;
+
 /**
  * 语音转文字服务接口
  * <p>
@@ -17,4 +19,9 @@ public interface TranscriptionService {
      * @return 转录后的文本内容
      */
     String transcribe(String audioFilePath, Long configId);
+
+    /**
+     * 转录音频并返回句子级时间戳、原始说话人标识及音频时长。
+     */
+    TranscriptionResult transcribeDetailed(String audioFilePath, Long configId);
 }

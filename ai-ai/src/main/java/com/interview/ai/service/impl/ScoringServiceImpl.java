@@ -28,6 +28,9 @@ import java.util.regex.Pattern;
  *   <li>公司档次校准：根据企业等级调整评分标准</li>
  * </ul>
  * </p>
+ *
+ * <p>新面试复盘主链路使用 {@link RubricScoringService} 的“标准答案—逐项比对”策略；本类保留
+ * 历史单阶段、分批和双阶段接口，避免既有调用方在迁移期间行为中断。</p>
  */
 @Slf4j
 @Service
@@ -37,7 +40,17 @@ public class ScoringServiceImpl implements ScoringService {
     private final AiClientFactory aiClientFactory;
     private final AiConfigService aiConfigService;
     private final StructuredOutputInvoker outputInvoker;
+    private final RubricScoringService rubricScoringService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public String analyzeWithRubric(String text, String jdText, String resumeText,
+                                    String positionTitle, String industry, Integer companyTier, Long configId,
+                                    List<SavedRubric> savedRubrics) {
+        // 评分主链路统一委托给量表服务，避免两套计分算法产生不一致的结果。
+        return rubricScoringService.analyze(text, jdText, resumeText,
+                positionTitle, industry, companyTier, configId, savedRubrics);
+    }
 
     /** 每批最多评估的问题数 */
     private static final int BATCH_SIZE = 8;
@@ -96,7 +109,7 @@ public class ScoringServiceImpl implements ScoringService {
 
         LlmClient client = resolveClient(configId);
 
-        // Step 1: 将转录文本按长度分块（LLM 从每块中识别问答对）
+        // 兼容路径：将连续文本分块，LLM 在每块中独立识别问答；新主链路使用带 ASR 元数据的量表评分。
         List<String> chunks = splitTranscript(text);
         log.info("转录文本分为 {} 块", chunks.size());
 

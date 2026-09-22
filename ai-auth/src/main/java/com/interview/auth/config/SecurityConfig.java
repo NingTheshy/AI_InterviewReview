@@ -1,6 +1,7 @@
 package com.interview.auth.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -17,6 +18,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.Arrays;
 
 /**
  * Spring Security 配置
@@ -32,6 +34,9 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
+    @Value("${interview.security.allowed-origins:http://localhost:3000,http://localhost:5173}")
+    private String allowedOrigins;
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
@@ -41,7 +46,10 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
-        config.addAllowedOriginPattern("*");
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList());
         config.addAllowedHeader("*");
         config.addAllowedMethod("*");
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -70,6 +78,8 @@ public class SecurityConfig {
                         .requestMatchers("/favicon.ico").permitAll()
                         // 上传文件访问（需登录）
                         .requestMatchers("/files/**").authenticated()
+                        // Fun-ASR 使用 HMAC 短时签名校验，不能附带用户 JWT。
+                        .requestMatchers(HttpMethod.GET, "/asr-files/**").permitAll()
                         // 其他需要认证
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex

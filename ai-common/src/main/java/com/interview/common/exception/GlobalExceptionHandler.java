@@ -5,6 +5,7 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /** 将业务错误码映射到适合前端处理的 HTTP 状态，同时保留原始业务码。 */
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<Void>> handleBusinessException(BusinessException e) {
         log.warn("业务异常: code={}, message={}", e.getCode(), e.getMessage());
@@ -29,6 +31,7 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(status).body(Result.error(e.getCode(), e.getMessage()));
     }
 
+    /** 维护业务错误码与 HTTP 语义的单一映射点，未列出的业务错误默认视为请求错误。 */
     private HttpStatus mapCodeToStatus(int code) {
         return switch (code) {
             // 标准 HTTP 状态码
@@ -47,6 +50,7 @@ public class GlobalExceptionHandler {
         };
     }
 
+    /** 聚合请求体字段校验错误，避免前端只能获得第一条错误。 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> handleValidationException(MethodArgumentNotValidException e) {
@@ -57,6 +61,7 @@ public class GlobalExceptionHandler {
         return Result.error(400, message);
     }
 
+    /** 处理查询参数和表单绑定错误。 */
     @ExceptionHandler(BindException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> handleBindException(BindException e) {
@@ -67,12 +72,23 @@ public class GlobalExceptionHandler {
         return Result.error(400, message);
     }
 
+    /** 处理方法参数上的 Bean Validation 约束错误。 */
     @ExceptionHandler(ConstraintViolationException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> handleConstraintViolationException(ConstraintViolationException e) {
         return Result.error(400, e.getMessage());
     }
 
+    /** 保留底层资源访问服务设定的 HTTP 状态和响应头，例如文件 Range 错误。 */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Result<Void>> handleResponseStatusException(ResponseStatusException e) {
+        int status = e.getStatusCode().value();
+        String message = e.getReason() == null ? "请求无法处理" : e.getReason();
+        return ResponseEntity.status(e.getStatusCode()).headers(e.getHeaders())
+                .body(Result.error(status, message));
+    }
+
+    /** 最后一层异常屏障：记录完整堆栈，但不向客户端泄漏内部实现细节。 */
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<Void> handleException(Exception e) {

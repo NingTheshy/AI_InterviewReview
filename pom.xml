@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.5</version>
+        <version>3.5.15</version>
         <relativePath/>
     </parent>
 
@@ -37,10 +37,20 @@
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <lombok.version>1.18.32</lombok.version>
         <pdfbox.version>3.0.1</pdfbox.version>
+        <spring-ai.version>1.1.8</spring-ai.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Spring AI：与 Spring Boot 3.5.x 对齐的模型客户端依赖版本 -->
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
             <!-- 内部模块 -->
             <dependency>
                 <groupId>com.interview</groupId>

@@ -2,6 +2,8 @@ package com.interview.interview.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.InterviewStatus;
 import com.interview.common.exception.BusinessException;
@@ -24,7 +26,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -50,6 +51,7 @@ public class InterviewServiceImpl implements InterviewService {
     private final InterviewMapper interviewMapper;
     private final InterviewQuestionMapper questionMapper;
     private final InterviewAsyncService interviewAsyncService;
+    private final ObjectMapper objectMapper;
 
     @Value("${interview.file.upload-dir:./uploads}")
     private String uploadDir;
@@ -71,10 +73,11 @@ public class InterviewServiceImpl implements InterviewService {
                        String jdText, String title, String companyName,
                        String positionTitle, String industry, String interviewType) {
         FileUtil.validateAudioFile(audioFile);
+        FileUtil.validateResumeFile(resumeFile);
 
         String audioFileName = FileUtil.generateFileName(audioFile.getOriginalFilename());
         try {
-            Path audioPath = FileUtil.saveFile(audioFile, uploadDir, audioFileName);
+            FileUtil.saveFile(audioFile, uploadDir, audioFileName);
         } catch (IOException e) {
             log.error("保存音频文件失败", e);
             throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "文件保存失败");
@@ -82,7 +85,6 @@ public class InterviewServiceImpl implements InterviewService {
 
         String resumeFileName = null;
         String resumeText = null;
-        FileUtil.validateResumeFile(resumeFile);
         resumeFileName = FileUtil.generateFileName(resumeFile.getOriginalFilename());
         try {
             FileUtil.saveFile(resumeFile, uploadDir, resumeFileName);
@@ -279,10 +281,10 @@ public class InterviewServiceImpl implements InterviewService {
         if (step == null) return "未开始";
         return switch (step) {
             case 0 -> "未开始";
-            case 1 -> "语音转文字";
-            case 2 -> "问题边界识别";
-            case 3 -> "逐题评分";
-            case 4 -> "整体评分";
+            case 1 -> "FunASR转写与说话人识别";
+            case 2 -> "标准答案生成与逐项比对";
+            case 3 -> "服务端计分与结果保存";
+            case 4 -> "整体评分与总结";
             default -> "未知步骤";
         };
     }
@@ -370,7 +372,11 @@ public class InterviewServiceImpl implements InterviewService {
                         .id(q.getId())
                         .questionIndex(q.getQuestionIndex())
                         .questionText(q.getQuestionText())
+                        .questionSpeaker(q.getQuestionSpeaker())
                         .answerText(q.getAnswerText())
+                        .answerSpeaker(q.getAnswerSpeaker())
+                        .startTime(q.getStartTime())
+                        .endTime(q.getEndTime())
                         .score(q.getScore())
                         .dimensionContent(q.getDimensionContent())
                         .dimensionLogic(q.getDimensionLogic())
@@ -378,6 +384,7 @@ public class InterviewServiceImpl implements InterviewService {
                         .dimensionProfessional(q.getDimensionProfessional())
                         .improvementTip(q.getImprovementTip())
                         .referenceAnswer(q.getReferenceAnswer())
+                        .rubricDetail(parseRubricDetail(q.getRubricDetail()))
                         .build())
                 .collect(Collectors.toList());
 
@@ -393,6 +400,7 @@ public class InterviewServiceImpl implements InterviewService {
                 .audioFilePath(interview.getAudioFilePath())
                 .audioDuration(interview.getAudioDuration())
                 .transcriptText(interview.getTranscriptText())
+                .transcriptSegments(parseJson(interview.getTranscriptSegments(), "句子级转写"))
                 .overallScore(interview.getOverallScore())
                 .dimensionContent(interview.getDimensionContent())
                 .dimensionLogic(interview.getDimensionLogic())
@@ -405,5 +413,19 @@ public class InterviewServiceImpl implements InterviewService {
                 .questions(questionResponses)
                 .createdAt(interview.getCreatedAt())
                 .build();
+    }
+
+    private JsonNode parseRubricDetail(String value) {
+        return parseJson(value, "评分量表");
+    }
+
+    private JsonNode parseJson(String value, String description) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return objectMapper.readTree(value);
+        } catch (IOException e) {
+            log.warn("{} JSON 解析失败，忽略异常明细", description, e);
+            return null;
+        }
     }
 }

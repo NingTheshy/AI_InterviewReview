@@ -36,6 +36,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final RedisUtil redisUtil;
     private final UserMapper userMapper;
 
+    /**
+     * 将有效 Bearer Token 转换为当前请求的认证上下文。
+     *
+     * <p>认证顺序固定为：跳过 CORS 预检、校验 JWT 签名与过期时间、校验 Redis 注销黑名单、
+     * 从数据库读取当前账户状态和角色，最后写入 {@link SecurityContextHolder}。角色和禁用状态
+     * 不从 Token 读取，确保管理员调整权限或禁用用户后可在下一次请求立即生效。</p>
+     *
+     * @param request 当前 HTTP 请求
+     * @param response 当前 HTTP 响应，用于直接返回认证失败信息
+     * @param filterChain 后续过滤器链
+     * @throws ServletException 过滤器链执行失败时抛出
+     * @throws IOException 写入响应或继续过滤器链失败时抛出
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,

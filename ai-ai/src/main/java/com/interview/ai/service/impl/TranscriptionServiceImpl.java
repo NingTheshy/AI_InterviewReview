@@ -1,14 +1,11 @@
 package com.interview.ai.service.impl;
 
-import com.interview.ai.audio.AudioChunk;
 import com.interview.ai.audio.AudioPreprocessor;
-import com.interview.ai.audio.AudioSplitter;
-import com.interview.ai.audio.ReliableSender;
-import com.interview.ai.audio.TextMerger;
-import com.interview.ai.config.AudioChunkProperties;
+import com.interview.ai.dto.TranscriptionResult;
 import com.interview.ai.factory.AiClientFactory;
 import com.interview.ai.service.AsrClient;
 import com.interview.ai.service.TranscriptionService;
+import com.interview.ai.service.WholeFileAsrClient;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -22,8 +19,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.List;
-import java.util.Map;
+import java.time.Duration;
+import java.util.UUID;
 
 /**
  * 语音转文字服务实现类
@@ -32,8 +29,7 @@ import java.util.Map;
  * 支持指定 ASR 配置或使用默认配置。
  * </p>
  * <p>
- * 对于超过阈值的大音频文件，自动进行分片处理：
- * 预处理 → 静音检测切片 → 并发 ASR 调用 → 文本合并去重。
+ * Fun-ASR 等长音频模型使用完整文件异步转写；其他模型由各自客户端处理输入限制。
  * </p>
  */
 @Slf4j
@@ -42,14 +38,25 @@ import java.util.Map;
 public class TranscriptionServiceImpl implements TranscriptionService {
 
     private final AiClientFactory aiClientFactory;
-    private final AudioChunkProperties chunkProperties;
     private final AudioPreprocessor audioPreprocessor;
-    private final AudioSplitter audioSplitter;
-    private final ReliableSender reliableSender;
-    private final TextMerger textMerger;
 
     @Override
     public String transcribe(String audioFilePath, Long configId) {
+        return transcribeDetailed(audioFilePath, configId).text();
+    }
+
+    /**
+     * 根据当前 ASR 配置转写本地音频，并尽可能保留结构化转写信息。
+     *
+     * <p>完整文件客户端（Fun-ASR）走流式预处理路径，避免把长音频读入堆内存；传统直传客户端
+     * 保持原有 {@link MultipartFile} 调用方式。调用方可统一使用返回对象，兼容只提供纯文本的旧模型。</p>
+     *
+     * @param audioFilePath 已保存的音频绝对或相对路径
+     * @param configId 指定 AI 配置；为空时使用默认 ASR 配置
+     * @return 转写文本、句子元数据和可获得的音频时长
+     */
+    @Override
+    public TranscriptionResult transcribeDetailed(String audioFilePath, Long configId) {
         log.info("开始语音转文字: filePath={}, configId={}", audioFilePath, configId);
 
         Path path = Paths.get(audioFilePath);
@@ -59,65 +66,22 @@ public class TranscriptionServiceImpl implements TranscriptionService {
         }
 
         try {
-            byte[] audioBytes = Files.readAllBytes(path);
-            String filename = path.getFileName().toString();
             AsrClient client = aiClientFactory.getAsrClientByConfigId(configId);
 
-            // 小文件直传
-            if (audioBytes.length <= chunkProperties.getMaxDirectSize()) {
-                log.info("音频文件较小（{}KB），直接调用 ASR", audioBytes.length / 1024);
-                MultipartFile multipartFile = new SimpleMultipartFile(filename, audioBytes);
-                String transcript = client.transcribe(multipartFile, "zh");
-                log.info("语音转文字完成: 长度={}", transcript.length());
-                return transcript;
+            // Fun-ASR 等长音频异步模型必须以完整文件提交。此分支必须在读取全部字节之前执行，
+            // 避免将数百 MB 甚至 GB 级音频载入 JVM 堆内存。
+            if (client instanceof WholeFileAsrClient wholeFileClient) {
+                return transcribeWholeFile(path, wholeFileClient, "zh");
             }
 
-            // 大文件：分片处理
-            log.info("音频文件超过阈值（{}MB > {}MB），启动分片转录",
-                    audioBytes.length / 1024 / 1024,
-                    chunkProperties.getMaxDirectSize() / 1024 / 1024);
+            byte[] audioBytes = Files.readAllBytes(path);
+            String filename = path.getFileName().toString();
 
-            // 1. 预处理：转换为 16kHz 16bit 单声道 WAV
-            byte[] wavData = audioPreprocessor.preprocess(audioBytes, filename);
-
-            // 2. 智能切片
-            List<AudioChunk> chunks = audioSplitter.split(wavData);
-            log.info("音频切片完成: {} 个片段", chunks.size());
-            for (AudioChunk chunk : chunks) {
-                long base64Estimate = chunk.getAudioData().length * 4L / 3;
-                String sizeWarning = base64Estimate > 9_000_000 ? " ⚠️ 可能超限!" : "";
-                log.info("  片段 {}: {}s - {}s, 大小={}KB, 预估base64={}KB{}",
-                        chunk.getSeq(),
-                        String.format("%.1f", chunk.getStartTime()),
-                        String.format("%.1f", chunk.getEndTime()),
-                        chunk.getAudioData().length / 1024,
-                        base64Estimate / 1024,
-                        sizeWarning);
-            }
-
-            // 3. 并发 ASR 转录（带重试和去重）
-            Map<Integer, String> results = reliableSender.sendAll(chunks, client);
-
-            // 检查是否有丢失的片段
-            if (results.size() < chunks.size()) {
-                log.warn("警告: 有 {} 个片段转录失败（总共 {} 个）",
-                        chunks.size() - results.size(), chunks.size());
-                for (AudioChunk chunk : chunks) {
-                    if (!results.containsKey(chunk.getSeq())) {
-                        log.warn("  丢失片段 {}: {}s - {}s",
-                                chunk.getSeq(),
-                                String.format("%.1f", chunk.getStartTime()),
-                                String.format("%.1f", chunk.getEndTime()));
-                    }
-                }
-            }
-
-            // 4. 文本合并去重
-            String transcript = textMerger.merge(results, audioSplitter.getOverlapDuration());
-            log.info("分片转录完成: 成功片段={}/{}, 文本长度={}",
-                    results.size(), chunks.size(), transcript.length());
-
-            return transcript;
+            log.info("调用 ASR 直传客户端: 文件={}，大小={}KB", filename, audioBytes.length / 1024);
+            MultipartFile multipartFile = new SimpleMultipartFile(filename, audioBytes);
+            String transcript = client.transcribe(multipartFile, "zh");
+            log.info("语音转文字完成: 长度={}", transcript.length());
+            return TranscriptionResult.textOnly(transcript);
 
         } catch (BusinessException e) {
             throw e;
@@ -133,8 +97,37 @@ public class TranscriptionServiceImpl implements TranscriptionService {
     }
 
     /**
-     * 简单的 MultipartFile 实现
+     * 将长音频预处理为 Fun-ASR 所需的单声道 WAV 后整体提交。
+     *
+     * <p>临时文件必须在所有成功、失败和中断路径中清理；音频时长以预处理结果计算，确保与实际
+     * 上传给模型的文件一致。</p>
      */
+    private TranscriptionResult transcribeWholeFile(Path source, WholeFileAsrClient client, String language) {
+        Path preparedAudio = source.resolveSibling(".funasr-" + UUID.randomUUID() + ".wav");
+        try {
+            double durationSeconds = audioPreprocessor.preprocessToMonoWav(source, preparedAudio);
+            Duration maxDuration = client.maxRecommendedDuration();
+            if (durationSeconds > maxDuration.toSeconds()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(),
+                        "开启说话人分离时音频建议不超过 " + maxDuration.toMinutes() + " 分钟，当前为 "
+                                + Math.round(durationSeconds / 60.0) + " 分钟");
+            }
+
+            TranscriptionResult result = client.transcribeDetailed(preparedAudio, language)
+                    .withAudioDurationSeconds((int) Math.ceil(durationSeconds));
+            log.info("完整音频转写完成: 文件={}, 文本长度={}, 句子数={}",
+                    source.getFileName(), result.text().length(), result.sentences().size());
+            return result;
+        } finally {
+            try {
+                Files.deleteIfExists(preparedAudio);
+            } catch (IOException e) {
+                log.warn("清理 Fun-ASR 临时单声道音频失败: {}", preparedAudio, e);
+            }
+        }
+    }
+
+    /** 为仍使用直传协议的 ASR 客户端提供最小化的内存型 {@link MultipartFile} 适配器。 */
     private static class SimpleMultipartFile implements MultipartFile {
 
         private final String filename;

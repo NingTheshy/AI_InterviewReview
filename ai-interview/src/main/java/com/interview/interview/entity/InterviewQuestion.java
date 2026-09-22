@@ -25,4 +25,5 @@ public class InterviewQuestion extends BaseEntity {
     private Integer dimensionProfessional;
     private String improvementTip;
     private String referenceAnswer;
+    private String rubricDetail;
 }

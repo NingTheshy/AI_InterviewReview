@@ -48,6 +48,7 @@ CREATE TABLE `interview` (
     `resume_text` TEXT COMMENT '简历文本内容(系统从PDF提取)',
     `jd_text` TEXT COMMENT '岗位JD内容',
     `transcript_text` LONGTEXT COMMENT '完整转写文本',
+    `transcript_segments` LONGTEXT COMMENT '句子级转写结果(JSON，含speakerId、speakerRole和毫秒时间戳)',
     `overall_score` INT COMMENT '整体评分(0-100)',
     `dimension_content` INT COMMENT '内容质量评分(0-100)',
     `dimension_logic` INT COMMENT '逻辑性评分(0-100)',
@@ -58,7 +59,7 @@ CREATE TABLE `interview` (
     `strengths` TEXT COMMENT '优势总结',
     `weaknesses` TEXT COMMENT '待提升方面',
     `status` TINYINT DEFAULT 0 COMMENT '状态: 0-处理中 1-已完成 2-失败',
-    `processing_step` TINYINT DEFAULT 0 COMMENT '处理步骤: 0-未开始 1-语音转文字 2-问题识别 3-逐题评分 4-整体评分',
+    `processing_step` TINYINT DEFAULT 0 COMMENT '处理步骤: 0-未开始 1-FunASR转写 2-标准生成与比对 3-计分保存 4-整体总结',
     `error_message` TEXT COMMENT '失败原因',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -91,6 +92,7 @@ CREATE TABLE `interview_question` (
     `dimension_professional` INT COMMENT '专业度评分(0-100)',
     `improvement_tip` TEXT COMMENT '改进建议',
     `reference_answer` TEXT COMMENT '参考答案',
+    `rubric_detail` LONGTEXT COMMENT '评分量表与逐要点比对结果(JSON)',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -107,11 +109,11 @@ CREATE TABLE `interview_note` (
     `user_id` BIGINT NOT NULL COMMENT '用户ID',
     `note_content` LONGTEXT COMMENT '笔记内容(富文本)',
     `note_type` VARCHAR(20) NOT NULL COMMENT '笔记类型: INTERVIEW-面试笔记 QUESTION-问题笔记',
-    `question_id` BIGINT COMMENT '问题ID(问题笔记时必填)',
+    `question_id` BIGINT NOT NULL DEFAULT 0 COMMENT '问题ID(问题笔记时为真实ID，面试笔记为0)',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    UNIQUE INDEX `uk_interview_user` (`interview_id`, `user_id`, `note_type`),
+    UNIQUE INDEX `uk_note_scope` (`interview_id`, `user_id`, `note_type`, `question_id`),
     INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试笔记表';
 

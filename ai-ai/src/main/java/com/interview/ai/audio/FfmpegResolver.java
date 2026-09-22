@@ -1,6 +1,6 @@
 package com.interview.ai.audio;
 
-import com.interview.ai.config.AudioChunkProperties;
+import com.interview.ai.config.FunAsrProperties;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +18,7 @@ import java.util.List;
  * <p>
  * 三级搜索策略：
  * <ol>
- *   <li>优先使用配置路径（ai.chunk.ffmpeg-path 或环境变量 FFMPEG_PATH）</li>
+ *   <li>优先使用配置路径（ai.funasr.ffmpeg-path 或环境变量 FUNASR_FFMPEG_PATH）</li>
  *   <li>搜索系统 PATH 和常见安装目录</li>
  *   <li>使用默认值 "ffmpeg"（依赖系统 PATH）</li>
  * </ol>
@@ -29,7 +29,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class FfmpegResolver {
 
-    private final AudioChunkProperties chunkProperties;
+    private final FunAsrProperties funAsrProperties;
 
     /** 探测到的有效 FFmpeg 路径（缓存） */
     private volatile String resolvedPath;
@@ -62,7 +62,7 @@ public class FfmpegResolver {
      */
     private String doResolve() {
         // 第一级：配置路径
-        String configured = chunkProperties.getFfmpegPath();
+        String configured = funAsrProperties.getFfmpegPath();
         if (configured != null && !configured.isBlank() && !"ffmpeg".equals(configured)) {
             if (isExecutable(configured)) {
                 log.info("FFmpeg 路径（配置）: {}", configured);
@@ -85,7 +85,7 @@ public class FfmpegResolver {
         }
 
         // 全部失败
-        log.error("未找到可用的 FFmpeg。请安装 FFmpeg 并配置 ai.chunk.ffmpeg-path 或添加到系统 PATH");
+        log.error("未找到可用的 FFmpeg。请安装 FFmpeg 并配置 ai.funasr.ffmpeg-path 或添加到系统 PATH");
         return null;
     }
 

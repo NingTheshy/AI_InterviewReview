@@ -4,6 +4,8 @@
 > 日期: 2026-06-07  
 > 适用对象: 项目开发人员、运维人员、技术负责人
 
+> 评分实现更新：本文后续关于阶梯制评分和 `SCORING_TWO_PHASE` 的描述属于旧版本。当前处理流程为“识别问答 → 生成满分答案与量表 → 逐项比对 → 服务端计分 → 整场汇总”，以根目录 `README.md` 和 `RubricScoringService` 为准。已有数据库需先执行 `sql/upgrade_rubric_scoring.sql`。
+
 ---
 
 ## 一、项目简介
@@ -31,7 +33,7 @@
 | 技术 | 版本 | 用途 |
 |------|------|------|
 | Java | 17 LTS | 编程语言 |
-| Spring Boot | 3.2.5 | 后端框架 |
+| Spring Boot | 3.5.15 | 后端框架 |
 | Spring Security | 6.2.x | 安全认证 |
 | MyBatis-Plus | 3.5.5 | ORM 框架 |
 | MySQL | 8.0+ | 关系型数据库 |

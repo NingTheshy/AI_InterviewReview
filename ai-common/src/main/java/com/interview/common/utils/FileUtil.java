@@ -9,7 +9,6 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.Set;
 import java.util.UUID;
 
@@ -132,13 +131,20 @@ public class FileUtil {
      * @throws IOException 文件保存失败时抛出
      */
     public static Path saveFile(MultipartFile file, String uploadDir, String fileName) throws IOException {
+        if (fileName == null || fileName.isBlank() || fileName.equals(".") || fileName.equals("..")
+                || fileName.contains("/") || fileName.contains("\\")) {
+            throw new IOException("无效文件名");
+        }
         Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
         }
-        Path filePath = uploadPath.resolve(fileName);
+        Path filePath = uploadPath.resolve(fileName).normalize();
+        if (!filePath.startsWith(uploadPath)) {
+            throw new IOException("文件路径超出上传目录");
+        }
         try (InputStream inputStream = file.getInputStream()) {
-            Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(inputStream, filePath);
         }
         return filePath;
     }

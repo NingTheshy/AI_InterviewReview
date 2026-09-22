@@ -27,6 +27,7 @@ public class Interview extends BaseEntity {
     private String resumeText;
     private String jdText;
     private String transcriptText;
+    private String transcriptSegments;
     private Integer overallScore;
     private Integer dimensionContent;
     private Integer dimensionLogic;

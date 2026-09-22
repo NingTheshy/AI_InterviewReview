@@ -6,6 +6,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
@@ -70,6 +71,15 @@ class GlobalExceptionHandlerTest {
         Result<Void> result = handler.handleConstraintViolationException(e);
         assertEquals(400, result.getCode());
         assertEquals("参数校验失败", result.getMessage());
+    }
+
+    @Test
+    void responseStatusExceptionPreservesHttpStatus() {
+        ResponseEntity<Result<Void>> response = handler.handleResponseStatusException(
+                new ResponseStatusException(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE, "无效 Range"));
+        assertEquals(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(416, response.getBody().getCode());
     }
 
     @Test

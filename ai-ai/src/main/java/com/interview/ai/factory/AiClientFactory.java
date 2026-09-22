@@ -19,6 +19,9 @@ import java.util.Map;
  * AI 客户端工厂
  * <p>
  * 管理和提供 AI 客户端实例。支持按 provider 名称或配置类型获取客户端。
+ *
+ * <p>运行时配置只决定选择哪个已注册客户端，客户端实例仍在应用启动时由 Spring 配置创建。
+ * 未找到有效数据库默认项时才回退至注册表中的可用客户端；该回退会记录日志，便于发现配置缺失。</p>
  * </p>
  */
 @Slf4j
@@ -34,17 +37,13 @@ public class AiClientFactory {
     /** LLM 客户端注册表：provider 名称 -> LlmClient 实例 */
     private final Map<String, LlmClient> llmRegistry = new HashMap<>();
 
-    /**
-     * 注册 ASR 客户端
-     */
+    /** 注册 ASR 客户端；同名 provider 的后注册实例会替换旧实例。 */
     public void registerAsrClient(String provider, AsrClient client) {
         asrRegistry.put(provider, client);
         log.info("注册 ASR 提供商: provider={}", provider);
     }
 
-    /**
-     * 注册 LLM 客户端
-     */
+    /** 注册 LLM 客户端；同名 provider 的后注册实例会替换旧实例。 */
     public void registerLlmClient(String provider, LlmClient client) {
         llmRegistry.put(provider, client);
         log.info("注册 LLM 提供商: provider={}", provider);
@@ -90,9 +89,7 @@ public class AiClientFactory {
         return getDefaultClient(ConfigType.LLM, llmRegistry);
     }
 
-    /**
-     * 根据配置 ID 获取 ASR 客户端
-     */
+    /** 根据有效配置 ID 选择 ASR 客户端；无效配置 ID 回退到默认客户端。 */
     public AsrClient getAsrClientByConfigId(Long configId) {
         if (configId != null && configId > 0) {
             AiConfig config = aiConfigMapper.selectById(configId);
@@ -107,9 +104,7 @@ public class AiClientFactory {
         return getDefaultAsrClient();
     }
 
-    /**
-     * 根据配置 ID 获取 LLM 客户端
-     */
+    /** 根据有效配置 ID 选择 LLM 客户端；无效配置 ID 回退到默认客户端。 */
     public LlmClient getLlmClientByConfigId(Long configId) {
         if (configId != null && configId > 0) {
             AiConfig config = aiConfigMapper.selectById(configId);
@@ -125,7 +120,10 @@ public class AiClientFactory {
     }
 
     /**
-     * 获取默认客户端（通用方法）
+     * 按配置类型获取默认客户端。
+     *
+     * <p>数据库默认项必须启用且其 provider 已注册；否则选择注册表中第一个客户端作为应用可用性
+     * 兜底。生产环境应始终显式配置默认项，不应依赖 HashMap 的回退顺序。</p>
      */
     @SuppressWarnings("unchecked")
     private <T> T getDefaultClient(ConfigType configType, Map<String, T> registry) {

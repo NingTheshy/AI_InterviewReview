@@ -1,5 +1,6 @@
 package com.interview.interview.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Builder;
 import lombok.Data;
 
@@ -37,7 +38,7 @@ public class InterviewDetailResponse {
     /** 处理状态 */
     private Integer status;
 
-    /** 处理步骤：0=待处理, 1=转写中, 2=问题识别, 3=逐题评分, 4=整体评分 */
+    /** 处理步骤：0=待处理, 1=FunASR转写, 2=标准生成与比对, 3=计分保存, 4=整体总结 */
     private Integer processingStep;
 
     /** 音频文件名（前端需拼接 /files/ 前缀访问，如 /files/{audioFilePath}） */
@@ -48,6 +49,9 @@ public class InterviewDetailResponse {
 
     /** 转写文本 */
     private String transcriptText;
+
+    /** 句子级转写结果，包含原始 speakerId、业务角色和毫秒级起止时间 */
+    private JsonNode transcriptSegments;
 
     /** 综合评分(0-100) */
     private Integer overallScore;
@@ -98,8 +102,20 @@ public class InterviewDetailResponse {
         /** 问题内容 */
         private String questionText;
 
+        /** 提问者业务角色：INTERVIEWER/CANDIDATE */
+        private String questionSpeaker;
+
         /** 回答内容 */
         private String answerText;
+
+        /** 回答者业务角色：INTERVIEWER/CANDIDATE */
+        private String answerSpeaker;
+
+        /** 问答开始时间（秒） */
+        private Integer startTime;
+
+        /** 问答结束时间（秒） */
+        private Integer endTime;
 
         /** 评分(0-100) */
         private Integer score;
@@ -121,5 +137,8 @@ public class InterviewDetailResponse {
 
         /** 参考答案 */
         private String referenceAnswer;
+
+        /** 新评分模式的逐要点量表；历史记录为空 */
+        private JsonNode rubricDetail;
     }
 }

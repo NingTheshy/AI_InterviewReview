@@ -13,8 +13,10 @@ import org.springframework.stereotype.Component;
 /**
  * 结构化输出调用器
  * <p>
- * 封装 LLM 调用，提供重试和 JSON 修复功能。
- * 解决 LLM 返回格式错误导致整个处理失败的问题。
+ * 封装 LLM 调用，提供受限的重试和 JSON 格式恢复功能。
+ *
+ * <p>恢复只处理 Markdown 包裹、尾逗号、控制字符和缺失闭合符等语法问题，不推断或补写业务字段；
+ * 调用方仍须对解析后的 JSON 执行业务语义校验。</p>
  * </p>
  */
 @Slf4j
@@ -29,7 +31,10 @@ public class StructuredOutputInvoker {
             "\n\n【重要】请严格返回纯 JSON，不要包含 markdown 代码块(```json)、额外解释或注释。";
 
     /**
-     * 带重试和 JSON 修复的 LLM 调用
+     * 带重试和受限格式恢复的 LLM 调用。
+     *
+     * <p>后续重试追加“纯 JSON”约束，避免改变原始业务提示。若本地恢复后可解析，仍由调用方
+     * 负责校验字段、索引和取值范围。</p>
      *
      * @param client       LLM 客户端
      * @param prompt       用户提示
@@ -85,9 +90,7 @@ public class StructuredOutputInvoker {
                 "AI 返回格式异常，请稍后重试");
     }
 
-    /**
-     * 清理 LLM 响应中的 markdown 代码块包裹
-     */
+    /** 去除模型常见的 Markdown 包裹和 JSON 前后说明文字，不修改 JSON 内部语义。 */
     private String cleanJsonResponse(String response) {
         if (response == null) return null;
 
@@ -127,7 +130,9 @@ public class StructuredOutputInvoker {
     }
 
     /**
-     * 本地 JSON 修复：修复常见的 JSON 格式问题
+     * 仅修复可机械判断的 JSON 语法缺陷。
+     *
+     * <p>不尝试猜测缺失字段或文本内容；无法安全修复时返回 {@code null} 以触发下一次模型调用。</p>
      */
     private String repairJson(String json) {
         if (json == null || json.isEmpty()) return null;
@@ -162,6 +167,7 @@ public class StructuredOutputInvoker {
         }
     }
 
+    /** 统计括号字符数量，供语法闭合修复使用。 */
     private int countOccurrences(String str, char c) {
         int count = 0;
         for (char ch : str.toCharArray()) {
