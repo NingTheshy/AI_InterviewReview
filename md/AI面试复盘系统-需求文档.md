@@ -1,8 +1,8 @@
 # AI 面试复盘系统 - 需求文档
 
-> 版本: v1.4 MVP  
-> 日期: 2026-09-21  
-> 状态: 已更新（统一量表评分、FunASR 时间戳与问题笔记规则）
+> 版本: v1.6 MVP
+> 日期: 2026-10-20
+> 状态: 已更新（统一量表评分、FunASR 时间戳、完整 RBAC、资源归属校验与 AI 密钥加密）
 
 ---
 
@@ -352,7 +352,9 @@ ai-web → ai-interview → ai-common
 #### 3.5.1 生成分享链接
 
 - 支持将面试复盘结果生成分享链接
+- 分享令牌必须使用密码学安全随机值生成，不得使用面试 ID、用户 ID 等可枚举信息
 - 分享链接有效期可选：24小时/7天/30天/永久
+- 支持设置可选的访问密码；服务端不得明文保存访问密码
 - 支持选择是否公开为"面经"（`isPublic`），公开面经无过期时间
 - 分享页面为只读，不允许编辑
 
@@ -361,6 +363,8 @@ ai-web → ai-interview → ai-common
 - 展示面试复盘的完整内容（转写文本、评分、建议）
 - 不展示原始音频文件（保护隐私）
 - 不展示用户笔记（保护隐私）
+- 不展示用户账号、邮箱、简历原文等身份或关联资源
+- 匿名访问必须同时校验分享令牌、分享状态、有效期及可选访问密码；不得通过面试 ID 直接访问
 
 #### 3.5.3 面经广场
 
@@ -411,29 +415,124 @@ ai-web → ai-interview → ai-common
 
 #### 3.7.1 RBAC 权限控制
 
-采用基于角色的访问控制（RBAC），固定两个角色：
+系统采用“用户—角色—权限”完整 RBAC 模型。当前预置两个系统内置角色，后续允许扩展更多细粒度角色：
 
 | 角色 | 标识 | 说明 |
 |------|------|------|
-| 管理员 | admin | 拥有系统所有权限 |
-| 普通用户 | user | 默认角色，仅访问自身数据 |
+| 普通用户 | user | 新账号默认角色，组织个人业务功能权限 |
+| 管理员 | admin | 组织额外管理权限，不具备任何代码层面的隐式特权 |
 
-权限定义：
+核心授权规则：
+
+- 一个用户可以关联多个角色，最终权限为所有有效角色所关联权限的并集，并对重复权限去重。
+- 管理员账号同时关联 `user` 和 `admin`；管理员执行每项操作时也必须通过 `role_permission` 获得对应权限。
+- 角色只负责组织权限，接口使用 `hasAuthority('权限码')` 等方式判断是否可以执行操作，不再通过 `hasRole('ADMIN')` 直接放行。
+- 业务规则负责判断当前用户能否操作指定资源，例如面试、笔记、收藏和分享是否属于当前用户。
+- 未明确授权时默认拒绝。公开接口必须进入显式白名单，不能因为遗漏安全注解而自动公开。
+- JWT 仅保存用户身份，不保存角色或权限快照；每次请求从数据库读取当前账号状态、角色及权限，使禁用账号、撤销角色和调整权限在下一次请求立即生效。
+- 当前阶段不引入权限缓存，也不建立通用的 `SELF/DEPARTMENT/ALL` 数据范围模型。跨用户查询通过 `*:read_all` 权限配合业务查询条件实现。
+- `user`、`admin` 为系统内置角色，角色编码不可修改、角色不可删除；后续允许在受控管理功能中调整其权限关系。
+- 新增权限默认不授予任何角色，必须通过 `role_permission` 显式配置后生效。
+
+账号与角色安全规则：
+
+- 新注册账号自动关联 `user` 角色。
+- 系统不允许账号最终处于无角色状态；管理员清空某账号角色时，必须在同一事务内自动补回 `user`。
+- 禁止拥有角色分配权限的用户增加、移除或替换自己的角色。
+- 角色分配者只能分配权限集合不超过其自身有效权限集合的角色，禁止越权授权。
+- 必须保护最后一个有效权限管理者：禁止删除、禁用或撤销最后一个仍拥有 `user:role:assign` 权限的有效账号。
+- 最后管理者判断依据是账号的有效权限，而不是是否具有名为 `admin` 的角色；检查与变更必须置于同一事务并进行并发控制。
+- 首个管理员不再由 SQL 写入固定默认密码。当系统不存在有效权限管理者时，从 `.env` 中读取初始化管理员账号和密码并创建；生产环境缺少该配置时启动失败。首次登录强制改密暂列后续优化。
+
+权限码采用稳定的“业务资源 + 操作”命名方式，与 URL 和 HTTP 方法解耦。初始权限分配如下：
 
 | 权限标识 | 说明 | 角色 |
 |---------|------|------|
-| user:list | 查看用户列表 | admin |
-| user:manage | 禁用/启用用户账号 | admin |
-| ai_config:list | 查看所有 AI 配置 | admin |
-| ai_config:manage | 新增/编辑/删除 AI 配置 | admin |
-| interview:view_all | 查看所有用户面试数据 | admin |
-| experience:manage | 下架/恢复面经 | admin |
+| interview:create | 创建并上传面试 | user |
+| interview:read | 查看本人面试、状态及关联文件 | user |
+| interview:manage | 删除或重试本人面试 | user |
+| note:manage | 查看和管理本人面试笔记及问题笔记 | user |
+| favorite:manage | 查看和管理本人收藏 | user |
+| share:manage | 查看和管理本人创建的分享 | user |
+| comment:manage_own | 发表评论，以及删除本人评论或本人发布面经下的评论 | user |
+| user:read | 查询用户列表和用户详情 | admin |
+| user:status:update | 启用或禁用用户账号 | admin |
+| user:role:assign | 为其他账号分配预置角色 | admin |
+| interview:read_all | 查看所有用户的面试数据 | admin |
+| experience:read_all | 查看全部面经及其管理状态 | admin |
+| experience:manage | 下架或恢复面经 | admin |
+| comment:read_all | 查看全部评论 | admin |
 | comment:manage | 删除任意评论 | admin |
-| system:stats | 查看系统统计数据 | admin |
+| ai_config:read | 查看 AI 配置 | admin |
+| ai_config:manage | 新增、修改、删除或设置默认 AI 配置 | admin |
+| system:stats:read | 查看系统统计数据 | admin |
+| system:monitor:read | 查看受保护的系统监控页面 | admin |
+| audit:read | 分页查询权限与高风险操作审计日志 | admin |
 
-- 新注册用户默认角色为 user
-- 后端通过自定义注解 `@RequirePermission` 或 Spring Security 的 `@PreAuthorize` 在接口层校验权限
-  - 管理员接口统一前缀 `/admin/**`
+`user` 和 `admin` 的权限取并集后构成管理员的完整能力。普通用户权限并不绕过资源归属校验，管理员权限也不因角色名称而自动扩展。
+
+接口授权矩阵：
+
+| 方法 | 路径 | 公开状态 / 权限码 | 资源或业务规则 |
+|------|------|-------------------|----------------|
+| POST | `/auth/send-code` | 公开 | 验证码频率限制 |
+| POST | `/auth/register` | 公开 | 注册成功后自动关联 `user` |
+| POST | `/auth/login` | 公开 | 校验账号有效状态 |
+| POST | `/auth/logout` | 登录校验 | 仅注销当前令牌 |
+| GET | `/auth/profile` | 登录校验 | 作为前端角色及权限状态的统一数据来源 |
+| PUT | `/auth/profile` | 登录校验 | 只能修改本人资料 |
+| PUT | `/auth/password` | 登录校验 | 只能修改本人密码并校验原密码 |
+| POST | `/interviews/upload` | `interview:create` | 新记录归属于当前用户 |
+| GET | `/interviews` | `interview:read` | 只查询当前用户的数据 |
+| GET | `/interviews/{id}` | `interview:read` | 仅资源所有者可见 |
+| DELETE | `/interviews/{id}` | `interview:manage` | 仅资源所有者可删除 |
+| GET | `/interviews/{id}/status` | `interview:read` | 仅资源所有者可见 |
+| POST | `/interviews/{id}/retry` | `interview:manage` | 仅资源所有者且状态为失败时可重试 |
+| GET | `/files/{filename}` | `interview:read` | 文件必须关联当前用户的面试 |
+| GET | `/asr-files/{filename}` | 签名公开接口 | 仅接受未过期且签名正确的模型取件 URL |
+| GET | `/interviews/{id}/note` | `note:manage` | 面试属于当前用户 |
+| PUT | `/interviews/{id}/note` | `note:manage` | 面试属于当前用户，支持同场多条笔记 |
+| GET | `/interviews/{id}/questions/{qid}/note` | `note:manage` | 面试和问题均属于当前用户 |
+| PUT | `/interviews/{id}/questions/{qid}/note` | `note:manage` | 面试和问题均属于当前用户，支持同题多条笔记 |
+| POST | `/favorites` | `favorite:manage` | 目标问题必须对当前用户可见 |
+| DELETE | `/favorites/{id}` | `favorite:manage` | 收藏属于当前用户 |
+| GET | `/favorites` | `favorite:manage` | 只查询当前用户的收藏 |
+| POST | `/interviews/{id}/share` | `share:manage` | 面试属于当前用户 |
+| GET | `/interviews/{id}/shares` | `share:manage` | 面试属于当前用户 |
+| DELETE | `/shares/{token}` | `share:manage` | 分享属于当前用户 |
+| PUT | `/shares/{token}/public` | `share:manage` | 分享属于当前用户 |
+| GET | `/share/{token}` | 公开 | 校验不可预测令牌、状态、有效期及可选访问密码；不暴露原始音频和用户资料 |
+| GET | `/experiences` | 公开 | 仅返回已发布且当前可见的面经 |
+| GET | `/experiences/{token}` | 公开 | 仅返回已发布且当前可见的面经 |
+| GET | `/experiences/{token}/comments` | 公开 | 面经必须公开可见 |
+| POST | `/experiences/{token}/comments` | `comment:manage_own` | 面经必须对当前用户可见 |
+| DELETE | `/comments/{id}` | `comment:manage_own` | 仅评论作者或面经发布者可删除 |
+| GET | `/admin/users` | `user:read` | 可按条件查询全部用户 |
+| GET | `/admin/users/{id}` | `user:read` | 目标用户存在 |
+| PUT | `/admin/users/{id}/status` | `user:status:update` | 禁止破坏最后管理者；记录审计日志 |
+| PUT | `/admin/users/{id}/role` | `user:role:assign` | 禁止修改自己、越权授权和产生无角色账号；记录审计日志 |
+| GET | `/admin/stats/overview` | `system:stats:read` | 统计口径仅包含允许纳入的数据 |
+| GET | `/admin/interviews` | `interview:read_all` | 跨用户只读查询 |
+| GET | `/admin/experiences` | `experience:read_all` | 查看公开及非公开面经状态 |
+| PUT | `/admin/experiences/{token}/status` | `experience:manage` | 记录状态变化审计日志 |
+| GET | `/admin/comments` | `comment:read_all` | 跨用户查询评论 |
+| DELETE | `/admin/comments/{id}` | `comment:manage` | 删除任意评论并记录审计日志 |
+| GET | `/admin/audit-logs` | `audit:read` | 只读分页查询，不提供修改或删除接口 |
+| GET | `/ai-configs` | `ai_config:read` | 返回值必须对密钥脱敏 |
+| GET | `/ai-configs/{id}` | `ai_config:read` | 返回值必须对密钥脱敏 |
+| POST | `/ai-configs` | `ai_config:manage` | 密钥加密存储并记录审计日志 |
+| PUT | `/ai-configs/{id}` | `ai_config:manage` | 密钥加密存储并记录审计日志 |
+| DELETE | `/ai-configs/{id}` | `ai_config:manage` | 校验配置引用关系并记录审计日志 |
+| PUT | `/ai-configs/{id}/default` | `ai_config:manage` | 同类型默认配置唯一；记录审计日志 |
+
+Swagger/Knife4j 文档仅在开发、测试环境公开；Druid 等监控入口要求 `system:monitor:read`，生产环境不得仅依赖固定 URL 或角色名保护。
+
+审计要求：
+
+- 记录角色分配与移除、账号启用与禁用、权限关系调整，以及因最后管理者保护而被拒绝的操作。
+- 审计内容至少包含操作者、目标对象、变更前后内容、操作时间、来源 IP 和执行结果。
+- 审计日志只追加，不提供普通业务删除或修改接口；只有具备 `audit:read` 权限的用户可以分页查询。
+- 密码、JWT、API Key、验证码等敏感信息不得写入审计日志。
 
 
 #### 3.7.2 用户管理
@@ -441,7 +540,7 @@ ai-web → ai-interview → ai-common
 - 分页查看所有用户列表（用户名、邮箱、角色、状态、注册时间）
 - 支持按用户名、邮箱、状态筛选
 - 支持禁用/启用用户账号（禁用后该用户无法登录）
-- 支持为用户分配角色（admin/user）
+- 支持为用户分配多个预置角色；当前预置 `user` 和 `admin`
 
 #### 3.7.3 系统统计
 
@@ -527,9 +626,31 @@ POST /auth/login
             "id": 1,
             "username": "zhangsan",
             "email": "zhangsan@example.com",
-            "nickname": "张三",
-            "role": 0
+            "nickname": "张三"
         }
+    }
+}
+```
+
+登录响应只返回身份信息和 Token，不返回角色或权限快照。前端登录成功后必须调用 `GET /auth/profile` 获取统一的权限状态。
+
+**当前用户信息响应示例：**
+```json
+{
+    "code": 200,
+    "message": "success",
+    "data": {
+        "id": 1,
+        "username": "admin",
+        "email": "admin@example.com",
+        "nickname": "管理员",
+        "roles": ["user", "admin"],
+        "permissions": [
+            "interview:create",
+            "interview:read",
+            "user:read",
+            "user:role:assign"
+        ]
     }
 }
 ```
@@ -654,7 +775,8 @@ interviewType: "coding"
 POST /interviews/1/share
 {
     "expireType": null,
-    "isPublic": true
+    "isPublic": true,
+    "accessPassword": null
 }
 ```
 
@@ -750,28 +872,28 @@ POST /experiences/abc123/comments
 
 ### 4.7 AI 配置模块 (ai-ai)
 
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| GET | `/ai-configs` | 获取 AI 配置列表 | 是 |
-| GET | `/ai-configs/{id}` | 获取单个配置详情 | 是 |
-| POST | `/ai-configs` | 新增 AI 模型配置 | 是 |
-| PUT | `/ai-configs/{id}` | 更新 AI 模型配置 | 是 |
-| DELETE | `/ai-configs/{id}` | 删除 AI 模型配置（逻辑删除） | 是 |
-| PUT | `/ai-configs/{id}/default` | 设为默认配置 | 是 |
+| 方法 | 路径 | 说明 | 认证 | 权限 |
+|------|------|------|------|------|
+| GET | `/ai-configs` | 获取 AI 配置列表 | 是 | ai_config:read |
+| GET | `/ai-configs/{id}` | 获取单个配置详情 | 是 | ai_config:read |
+| POST | `/ai-configs` | 新增 AI 模型配置 | 是 | ai_config:manage |
+| PUT | `/ai-configs/{id}` | 更新 AI 模型配置 | 是 | ai_config:manage |
+| DELETE | `/ai-configs/{id}` | 删除 AI 模型配置（逻辑删除） | 是 | ai_config:manage |
+| PUT | `/ai-configs/{id}/default` | 设为默认配置 | 是 | ai_config:manage |
 
 ### 4.8 管理员模块 (admin)
 
 | 方法 | 路径 | 说明 | 认证 | 权限 |
 |------|------|------|------|------|
-| GET | `/admin/users` | 获取用户列表（分页，支持筛选） | 是 | user:list |
-| GET | `/admin/users/{id}` | 获取用户详情 | 是 | user:list |
-| PUT | `/admin/users/{id}/status` | 禁用/启用用户 | 是 | user:manage |
-| PUT | `/admin/users/{id}/role` | 修改用户角色 | 是 | user:manage |
-| GET | `/admin/stats/overview` | 获取系统统计数据 | 是 | system:stats |
-| GET | `/admin/interviews` | 查看所有用户面试数据（分页） | 是 | interview:view_all |
-| GET | `/admin/experiences` | 查看所有面经（分页） | 是 | experience:manage |
+| GET | `/admin/users` | 获取用户列表（分页，支持筛选） | 是 | user:read |
+| GET | `/admin/users/{id}` | 获取用户详情 | 是 | user:read |
+| PUT | `/admin/users/{id}/status` | 禁用/启用用户 | 是 | user:status:update |
+| PUT | `/admin/users/{id}/role` | 替换用户的预置角色集合 | 是 | user:role:assign |
+| GET | `/admin/stats/overview` | 获取系统统计数据 | 是 | system:stats:read |
+| GET | `/admin/interviews` | 查看所有用户面试数据（分页） | 是 | interview:read_all |
+| GET | `/admin/experiences` | 查看所有面经（分页） | 是 | experience:read_all |
 | PUT | `/admin/experiences/{token}/status` | 下架/恢复面经 | 是 | experience:manage |
-| GET | `/admin/comments` | 查看所有评论（分页） | 是 | comment:manage |
+| GET | `/admin/comments` | 查看所有评论（分页） | 是 | comment:read_all |
 | DELETE | `/admin/comments/{id}` | 删除任意评论 | 是 | comment:manage |
 
 **禁用用户请求示例：**
@@ -786,7 +908,7 @@ PUT /admin/users/2/status
 ```json
 PUT /admin/users/2/role
 {
-    "role": "admin"
+    "roles": ["user", "admin"]
 }
 ```
 
@@ -817,7 +939,8 @@ PUT /admin/users/2/role
 | 400 | 请求参数错误 |
 | 401 | 未认证（Token 无效或过期） |
 | 403 | 无权限访问 |
-| 404 | 资源不存在 |
+| 404 | 资源不存在或当前用户无权确认资源是否存在 |
+| 409 | 资源可见，但当前业务状态不允许执行操作 |
 | 500 | 服务器内部错误 |
 | 1001 | 用户名已存在 |
 | 1002 | 密码错误 |
@@ -1001,11 +1124,20 @@ async:
 
 ### 7.2 接口安全
 
-- 所有业务接口需要 JWT 认证
-- RBAC 权限校验：管理员接口（`/admin/**`）需验证用户角色为 admin，通过 `@PreAuthorize` 注解在方法级别控制
-- 公开接口放行：`/share/{token}`、`/experiences`、`/experiences/{token}`、`/experiences/{token}/comments` 无需认证
-- 数据权限校验：普通用户只能访问自己的面试记录
-- 评论删除权限：评论者本人、面经发布者、管理员均可删除评论
+- 所有非公开业务接口必须先完成统一身份认证，再按照接口安全需求执行功能权限、资源归属和业务状态校验；未明确授权时默认拒绝
+- 功能授权以 `role -> role_permission -> permission` 为唯一来源，通过具体权限码进行判断，不允许基于 `admin` 角色名称或 `/admin/**` 路径自动放行
+- JWT 仅保存用户身份；账号状态、角色和权限在每次请求时从数据库加载，不把授权快照写入 Token
+- 当前用户信息接口统一返回角色编码和去重后的权限码集合，作为前端权限状态的唯一数据来源；前端隐藏菜单或按钮不能替代后端鉴权
+- 资源归属校验在业务层执行：普通用户只能访问和操作自己的面试、笔记、收藏、文件和分享记录
+- 当前不建设通用数据范围引擎；跨用户查询必须要求对应的 `*:read_all` 权限，并在查询条件中显式限定允许的数据范围
+- 评论删除规则：具有 `comment:manage_own` 的评论作者或面经发布者可按业务规则删除；删除任意评论还必须具有 `comment:manage`
+- 公开接口仅包括认证入口、公开面经列表和详情、公开面经评论列表、有效分享令牌访问，以及带有效签名的 ASR 临时取件地址
+- 面经广场只能返回已发布且当前可见的内容；草稿、下架、失效或审核中的内容不得通过公开接口访问
+- 分享访问必须校验不可预测令牌、状态、有效期及可选访问密码，并限制返回字段，禁止泄露原始音频、用户资料和其他关联资源
+- 未登录或令牌无效返回 HTTP `401`；已登录但缺少功能权限返回 `403`
+- 资源不存在或当前用户无权知道资源是否存在时统一返回 `404`，避免通过响应差异枚举其他用户资源
+- 资源可见但违反当前业务状态约束时返回 `409` 或对应的业务错误码
+- 用户角色、账号状态和角色权限关系变更必须记录不可篡改的审计日志；敏感字段必须脱敏
 - 接口参数校验：使用 Jakarta Validation 注解
 - SQL 注入防护：MyBatis-Plus 参数化查询
 - XSS 防护：前端输入过滤，后端响应头设置
@@ -1019,7 +1151,7 @@ async:
 
 ### 7.4 敏感数据安全
 
-- API Key 加密存储：使用 AES 对称加密
+- API Key 加密存储：使用 AES-256-GCM，每条密文使用独立随机 IV；主密钥只通过环境变量提供
 - 密钥配置在环境变量或配置中心，不写入代码仓库
 - 日志脱敏：用户密码、API Key 等敏感信息不输出到日志
 
@@ -1043,7 +1175,8 @@ async:
 - [x] 问题收藏功能
 - [x] 面试分享功能 + 面经广场 + 面经评论
 - [x] AI 模型配置管理
-- [x] 管理员模块（RBAC 权限控制、用户管理、系统统计）
+- [x] 管理员模块（用户管理、系统统计、面经与评论管理）
+- [x] 完整 RBAC 运行时授权、角色迁移、最后管理者保护与权限审计
 
 ### 8.2 不包含（后续迭代）
 

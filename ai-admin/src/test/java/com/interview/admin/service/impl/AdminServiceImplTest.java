@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.admin.dto.*;
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
+import com.interview.auth.service.AuditService;
+import com.interview.auth.service.RbacService;
 import com.interview.common.constant.UserStatus;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
@@ -28,6 +30,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -52,6 +55,12 @@ class AdminServiceImplTest {
     @Mock
     private InterviewCommentMapper interviewCommentMapper;
 
+    @Mock
+    private RbacService rbacService;
+
+    @Mock
+    private AuditService auditService;
+
     @InjectMocks
     private AdminServiceImpl adminService;
 
@@ -65,7 +74,6 @@ class AdminServiceImplTest {
         testUser.setUsername("testuser");
         testUser.setEmail("test@example.com");
         testUser.setNickname("Test User");
-        testUser.setRole(0);
         testUser.setStatus(UserStatus.ACTIVE.getCode());
         testUser.setLoginCount(10);
         testUser.setLastLoginAt(LocalDateTime.now());
@@ -131,7 +139,7 @@ class AdminServiceImplTest {
             when(userMapper.updateById(any(User.class))).thenReturn(1);
 
             // Act
-            adminService.updateUserStatus(TEST_USER_ID, UserStatus.DISABLED.getCode());
+            adminService.updateUserStatus(99L, TEST_USER_ID, UserStatus.DISABLED.getCode());
 
             // Assert
             verify(userMapper).updateById(any(User.class));
@@ -145,7 +153,7 @@ class AdminServiceImplTest {
 
             // Act & Assert
             assertThrows(BusinessException.class,
-                    () -> adminService.updateUserStatus(TEST_USER_ID, 0));
+                    () -> adminService.updateUserStatus(99L, TEST_USER_ID, 0));
         }
 
         @Test
@@ -153,13 +161,11 @@ class AdminServiceImplTest {
         void updateUserRole_Success() {
             // Arrange
             when(userMapper.selectById(TEST_USER_ID)).thenReturn(testUser);
-            when(userMapper.updateById(any(User.class))).thenReturn(1);
-
             // Act
-            adminService.updateUserRole(TEST_USER_ID, 1);
+            adminService.updateUserRoles(99L, TEST_USER_ID, Set.of("user", "admin"));
 
             // Assert
-            verify(userMapper).updateById(any(User.class));
+            verify(rbacService).replaceUserRoles(99L, TEST_USER_ID, Set.of("user", "admin"));
         }
 
         @Test
@@ -170,7 +176,7 @@ class AdminServiceImplTest {
 
             // Act & Assert
             assertThrows(BusinessException.class,
-                    () -> adminService.updateUserRole(TEST_USER_ID, 1));
+                    () -> adminService.updateUserRoles(99L, TEST_USER_ID, Set.of("admin")));
         }
     }
 

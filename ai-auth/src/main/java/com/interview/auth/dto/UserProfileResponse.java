@@ -3,6 +3,8 @@ package com.interview.auth.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.Set;
+
 /**
  * 用户资料响应 DTO
  */
@@ -15,5 +17,6 @@ public class UserProfileResponse {
     private String email;
     private String nickname;
     private String avatar;
-    private Integer role;
+    private Set<String> roles;
+    private Set<String> permissions;
 }

@@ -59,7 +59,9 @@ class InterviewControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "testuser",
-                        List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+                        List.of(new SimpleGrantedAuthority("interview:create"),
+                                new SimpleGrantedAuthority("interview:read"),
+                                new SimpleGrantedAuthority("interview:manage"))));
     }
 
     // ==================== upload 测试 ====================

@@ -56,7 +56,7 @@ class CommentControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "testuser",
-                        List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+                        List.of(new SimpleGrantedAuthority("comment:manage_own"))));
     }
 
     // ==================== listComments 测试 ====================

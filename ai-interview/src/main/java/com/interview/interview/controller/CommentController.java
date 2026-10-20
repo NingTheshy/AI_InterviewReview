@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -51,6 +52,7 @@ public class CommentController {
      */
     @Operation(summary = "发表评论")
     @PostMapping("/experiences/{token}/comments")
+    @PreAuthorize("hasAuthority('comment:manage_own')")
     public Result<Void> addComment(@PathVariable String token,
                                    @Valid @RequestBody CommentRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
@@ -66,6 +68,7 @@ public class CommentController {
      */
     @Operation(summary = "删除评论")
     @DeleteMapping("/comments/{id}")
+    @PreAuthorize("hasAuthority('comment:manage_own')")
     public Result<Void> deleteComment(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         commentService.deleteComment(id, userId);

@@ -5,9 +5,6 @@ import com.interview.common.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-
-
-
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("interview")

@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -33,6 +34,7 @@ import java.util.Arrays;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final Environment environment;
 
     @Value("${interview.security.allowed-origins:http://localhost:3000,http://localhost:5173}")
     private String allowedOrigins;
@@ -64,24 +66,20 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        // 认证模块 - 仅登录/注册/发码公开，其他需要认证
-                        .requestMatchers("/auth/login", "/auth/register", "/auth/send-code").permitAll()
-                        // 面经广场（公开 - 仅浏览）
-                        .requestMatchers(HttpMethod.GET, "/experiences/**").permitAll()
-                        .requestMatchers("/share/**").permitAll()
-                        // Knife4j / Swagger
-                        .requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
-                        // Druid 监控
-                        .requestMatchers("/druid/**").hasRole("ADMIN")
-                        // 静态资源
-                        .requestMatchers("/favicon.ico").permitAll()
-                        // 上传文件访问（需登录）
-                        .requestMatchers("/files/**").authenticated()
-                        // Fun-ASR 使用 HMAC 短时签名校验，不能附带用户 JWT。
-                        .requestMatchers(HttpMethod.GET, "/asr-files/**").permitAll()
-                        // 其他需要认证
-                        .anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> {
+                    auth.requestMatchers("/auth/login", "/auth/register", "/auth/send-code").permitAll();
+                    auth.requestMatchers(HttpMethod.GET,
+                            "/experiences", "/experiences/{token}",
+                            "/experiences/{token}/comments", "/share/{token}").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/asr-files/**").permitAll();
+                    auth.requestMatchers("/favicon.ico").permitAll();
+                    if (Arrays.stream(environment.getActiveProfiles()).noneMatch("prod"::equalsIgnoreCase)) {
+                        auth.requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**")
+                                .permitAll();
+                    }
+                    auth.requestMatchers("/druid/**").hasAuthority("system:monitor:read");
+                    auth.anyRequest().authenticated();
+                })
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, authException) -> {
                             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

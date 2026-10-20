@@ -1,8 +1,12 @@
 # AI 面试复盘系统 - 数据库设计文档
 
-> 版本: v1.3 MVP  
-> 日期: 2026-06-01  
-> 状态: 已更新（新增面经功能）
+> 版本: v1.6 RBAC + P1 安全加固
+> 日期: 2026-10-20
+> 状态: 已同步完整 RBAC、权限审计与 AI API Key 加密存储设计
+
+> **实施基准：** 新建数据库执行 `sql/schema.sql`；旧库依次执行
+> `sql/upgrade_rbac_v1_5.sql`、`sql/upgrade_security_p1_v1_6.sql`。`user_role` 是用户角色的唯一事实来源，`user` 表不再保存单值
+> `role` 字段。内置管理员账号不写入 SQL，由应用读取 `RBAC_BOOTSTRAP_ADMIN_*` 环境变量安全引导创建。
 
 ---
 
@@ -22,6 +26,7 @@
 | 面试分享 | 面试分享链接记录 | 万级 |
 | 面经评论 | 面经下的用户评论 | 十万级 |
 | AI 配置 | 模型提供商、API 密钥等 | 十级 |
+| 权限审计 | 角色、账号状态、AI 配置及内容治理等高风险操作记录 | 十万级 |
 
 ### 1.2 数据流分析
 
@@ -66,7 +71,7 @@
 ### 1.4 数据安全要求
 
 - 密码字段 BCrypt 加密存储（255 字符）
-- API Key 字段 AES 加密存储（500 字符预留）
+- API Key 字段使用 AES-256-GCM 加密存储（4096 字符密文预留）
 - 所有表支持逻辑删除（deleted 字段）
 - 敏感字段不输出到日志
 
@@ -113,6 +118,11 @@
                            └───────│  角色权限关联    │
                                    │(RolePermission)  │
                                    └──────────────────┘
+
+                   ┌────────────────────────┐
+                   │ 权限与高风险操作审计日志 │
+                   │ (PermissionAuditLog)   │
+                   └────────────────────────┘
 ```
 
 ### 2.2 实体属性分析
@@ -120,7 +130,7 @@
 **用户 (User)**
 - 标识属性：id
 - 描述属性：username, password, nickname, email, avatar
-- 状态属性：role, status, deleted
+- 状态属性：status, deleted（角色关系只保存在 user_role）
 - 登录属性：last_login_at, login_count
 - 时间属性：created_at, updated_at
 
@@ -178,12 +188,12 @@
 **角色 (Role)**
 - 标识属性：id
 - 描述属性：role_name (角色标识，如 admin/user), role_label (角色显示名称)
-- 状态属性：status, deleted
+- 状态属性：is_system, status, deleted
 - 时间属性：created_at, updated_at
 
 **权限 (Permission)**
 - 标识属性：id
-- 描述属性：permission_name (权限标识，如 user:list), permission_label (权限显示名称)
+- 描述属性：permission_name (权限标识，如 user:read), permission_label (权限显示名称)
 - 时间属性：created_at
 
 **用户角色关联 (UserRole)**
@@ -199,6 +209,14 @@
 - 关联属性：share_id (面经分享ID), user_id (评论者ID)
 - 内容属性：content (评论内容)
 - 状态属性：deleted
+- 时间属性：created_at
+
+**权限与高风险操作审计日志 (PermissionAuditLog)**
+- 标识属性：id
+- 操作者属性：operator_user_id, source_ip
+- 目标属性：target_type, target_id
+- 变更属性：action, before_data, after_data
+- 结果属性：success, failure_reason
 - 时间属性：created_at
 
 ### 2.3 E-R 图
@@ -364,6 +382,7 @@ InterviewComment (id, share_id, user_id, content, deleted, created_at)
 | Permission → RolePermission | 一对多 | 一个权限可分配给多个角色 |
 | InterviewShare → InterviewComment | 一对多 | 一条面经可有多条评论 |
 | User → InterviewComment | 一对多 | 一个用户可发表多条评论 |
+| User → PermissionAuditLog | 一对多（可空） | 高风险操作记录操作人；系统引导操作可无操作人 |
 
 **外键约束策略：**
 - 数据库层面**不建外键约束**（便于后续分库分表）
@@ -428,6 +447,10 @@ InterviewComment (id, share_id, user_id, content, deleted, created_at)
 | user_role | idx_role_id | role_id | 普通索引 | 按角色查询用户 |
 | role_permission | PRIMARY | role_id, permission_id | 联合主键 | 角色权限关联 |
 | role_permission | idx_permission_id | permission_id | 普通索引 | 按权限查询角色 |
+| permission_audit_log | PRIMARY | id | 主键 | 自增主键 |
+| permission_audit_log | idx_operator_user_id | operator_user_id | 普通索引 | 按操作人查询 |
+| permission_audit_log | idx_action | action | 普通索引 | 按操作类型查询 |
+| permission_audit_log | idx_created_at | created_at | 普通索引 | 按时间倒序查询 |
 | interview_comment | PRIMARY | id | 主键 | 自增主键 |
 | interview_comment | idx_share_id | share_id | 普通索引 | 按面经查询评论 |
 | interview_comment | idx_user_id | user_id | 普通索引 | 按用户查询评论 |
@@ -457,6 +480,7 @@ MVP 阶段不分区，数据量增长后可按以下策略分区：
 | user_role | ~100B | 10 万 | ~10MB |
 | role_permission | ~100B | 100 | ~10KB |
 | interview_comment | ~500B | 50 万 | ~250MB |
+| permission_audit_log | ~1KB | 50 万 | ~500MB |
 
 **注意：** `transcript_text` 和 `jd_text/resume_text` 使用 TEXT/LONGTEXT 类型，实际存储取决于音频时长和文本长度，可能显著增加存储需求。
 
@@ -476,7 +500,6 @@ CREATE TABLE `user` (
     `nickname` VARCHAR(50) COMMENT '昵称',
     `email` VARCHAR(100) NOT NULL COMMENT '邮箱',
     `avatar` VARCHAR(500) COMMENT '头像URL',
-    `role` TINYINT DEFAULT 0 COMMENT '角色: 0-普通用户 1-管理员',
     `status` TINYINT DEFAULT 1 COMMENT '状态: 0-禁用 1-正常',
     `last_login_at` DATETIME COMMENT '最后登录时间',
     `login_count` INT DEFAULT 0 COMMENT '登录次数',
@@ -569,7 +592,7 @@ CREATE TABLE `ai_config` (
     `config_name` VARCHAR(100) NOT NULL COMMENT '配置名称',
     `provider` VARCHAR(50) NOT NULL COMMENT '模型提供商: openai/deepseek/aliyun/baidu',
     `model_name` VARCHAR(100) NOT NULL COMMENT '模型名称',
-    `api_key` VARCHAR(500) COMMENT 'API密钥(加密存储)',
+    `api_key` VARCHAR(4096) COMMENT 'API密钥(AES-256-GCM加密存储)',
     `api_endpoint` VARCHAR(500) COMMENT 'API端点地址',
     `config_type` TINYINT NOT NULL COMMENT '用途: 1-语音转文字 2-文本分析评分',
     `is_default` TINYINT DEFAULT 0 COMMENT '是否默认: 0-否 1-是',
@@ -645,6 +668,7 @@ CREATE TABLE `role` (
     `id`         BIGINT       PRIMARY KEY AUTO_INCREMENT COMMENT '角色ID',
     `role_name`  VARCHAR(50)  NOT NULL                   COMMENT '角色标识: admin/user',
     `role_label` VARCHAR(100) NOT NULL                   COMMENT '角色显示名称',
+    `is_system`  TINYINT      DEFAULT 0                  COMMENT '是否系统内置角色: 0-否 1-是',
     `status`     TINYINT      DEFAULT 1                  COMMENT '状态: 0-禁用 1-启用',
     `deleted`    TINYINT      DEFAULT 0                  COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '创建时间',
@@ -658,7 +682,7 @@ CREATE TABLE `role` (
 ```sql
 CREATE TABLE `permission` (
     `id`                BIGINT       PRIMARY KEY AUTO_INCREMENT COMMENT '权限ID',
-    `permission_name`   VARCHAR(100) NOT NULL                   COMMENT '权限标识: user:list',
+    `permission_name`   VARCHAR(100) NOT NULL                   COMMENT '权限标识: user:read',
     `permission_label`  VARCHAR(200) NOT NULL                   COMMENT '权限显示名称',
     `created_at`        DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '创建时间',
     UNIQUE INDEX `uk_permission_name` (`permission_name`)
@@ -704,33 +728,61 @@ CREATE TABLE `interview_comment` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面经评论表';
 ```
 
+#### 5.1.13 permission_audit_log 表
+
+```sql
+CREATE TABLE `permission_audit_log` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '审计日志ID',
+    `operator_user_id` BIGINT COMMENT '操作人用户ID；系统引导操作可为空',
+    `action` VARCHAR(100) NOT NULL COMMENT '操作类型',
+    `target_type` VARCHAR(50) NOT NULL COMMENT '目标资源类型',
+    `target_id` VARCHAR(100) COMMENT '目标资源标识',
+    `before_data` LONGTEXT COMMENT '操作前非敏感数据(JSON)',
+    `after_data` LONGTEXT COMMENT '操作后非敏感数据(JSON)',
+    `source_ip` VARCHAR(64) COMMENT '来源IP',
+    `success` TINYINT NOT NULL COMMENT '是否成功: 0-否 1-是',
+    `failure_reason` VARCHAR(500) COMMENT '失败原因',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX `idx_operator_user_id` (`operator_user_id`),
+    INDEX `idx_action` (`action`),
+    INDEX `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限与高风险操作审计日志表';
+```
+
 ### 5.2 初始化数据
 
 ```sql
 -- 初始化角色数据
-INSERT INTO `role` (`id`, `role_name`, `role_label`) VALUES
-(1, 'admin', '管理员'),
-(2, 'user', '普通用户');
+INSERT INTO `role` (`id`, `role_name`, `role_label`, `is_system`) VALUES
+(1, 'admin', '管理员', 1),
+(2, 'user', '普通用户', 1);
 
 -- 初始化权限数据
 INSERT INTO `permission` (`id`, `permission_name`, `permission_label`) VALUES
-(1, 'user:list', '查看用户列表'),
-(2, 'user:manage', '管理用户账号'),
-(3, 'ai_config:list', '查看AI配置'),
-(4, 'ai_config:manage', '管理AI配置'),
-(5, 'interview:view_all', '查看所有面试数据'),
-(6, 'system:stats', '查看系统统计');
+(1, 'interview:create', '创建面试复盘'),
+(2, 'interview:read', '查看本人面试复盘'),
+(3, 'interview:manage', '管理本人面试复盘'),
+(4, 'note:manage', '管理本人笔记'),
+(5, 'favorite:manage', '管理本人收藏'),
+(6, 'share:manage', '管理本人分享'),
+(7, 'comment:manage_own', '发表和管理本人评论'),
+(8, 'user:read', '查看用户'),
+(9, 'user:status:update', '更新用户状态'),
+(10, 'user:role:assign', '分配用户角色'),
+(11, 'interview:read_all', '查看全部面试数据'),
+(12, 'experience:read_all', '查看全部面经'),
+(13, 'experience:manage', '管理面经'),
+(14, 'comment:read_all', '查看全部评论'),
+(15, 'comment:manage', '管理任意评论'),
+(16, 'ai_config:read', '查看AI配置'),
+(17, 'ai_config:manage', '管理AI配置'),
+(18, 'system:stats:read', '查看系统统计'),
+(19, 'system:monitor:read', '查看系统监控'),
+(20, 'audit:read', '查看审计日志');
 
--- 管理员角色拥有所有权限
-INSERT INTO `role_permission` (`role_id`, `permission_id`) VALUES
-(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6);
-
--- 初始化管理员账号（密码: admin123，BCrypt 加密）
-INSERT INTO `user` (`username`, `password`, `nickname`, `role`)
-VALUES ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '管理员', 1);
-
--- 管理员关联 admin 角色
-INSERT INTO `user_role` (`user_id`, `role_id`) VALUES (1, 1);
+-- user 角色关联权限 1-7；admin 角色关联权限 8-20。
+-- 管理员账号必须同时关联 user、admin，最终权限取并集。
+-- 初始化脚本不保存固定管理员密码，首个管理员由 RBAC_BOOTSTRAP_ADMIN_* 引导创建。
 
 -- 初始化默认 AI 配置（DeepSeek）
 INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`)
@@ -825,7 +877,6 @@ mybatis-plus:
 | user | nickname | VARCHAR(50) | 否 | NULL | 昵称 |
 | user | email | VARCHAR(100) | 是 | - | 邮箱（唯一） |
 | user | avatar | VARCHAR(500) | 否 | NULL | 头像URL |
-| user | role | TINYINT | 否 | 0 | 角色: 0-普通用户 1-管理员 |
 | user | status | TINYINT | 否 | 1 | 状态: 0-禁用 1-正常 |
 | user | last_login_at | DATETIME | 否 | NULL | 最后登录时间 |
 | user | login_count | INT | 否 | 0 | 登录次数 |
@@ -911,7 +962,7 @@ mybatis-plus:
 | ai_config | config_name | VARCHAR(100) | 是 | - | 配置名称 |
 | ai_config | provider | VARCHAR(50) | 是 | - | 模型提供商 |
 | ai_config | model_name | VARCHAR(100) | 是 | - | 模型名称 |
-| ai_config | api_key | VARCHAR(500) | 否 | NULL | API密钥(加密) |
+| ai_config | api_key | VARCHAR(4096) | 否 | NULL | API密钥(AES-256-GCM加密) |
 | ai_config | api_endpoint | VARCHAR(500) | 否 | NULL | API端点地址 |
 | ai_config | config_type | TINYINT | 是 | - | 用途: 1-语音转文字 2-文本分析评分 |
 | ai_config | is_default | TINYINT | 否 | 0 | 是否默认: 0-否 1-是 |
@@ -923,6 +974,7 @@ mybatis-plus:
 | role | id | BIGINT | 是 | 自增 | 主键 |
 | role | role_name | VARCHAR(50) | 是 | - | 角色标识(唯一) |
 | role | role_label | VARCHAR(100) | 是 | - | 角色显示名称 |
+| role | is_system | TINYINT | 否 | 0 | 是否系统内置角色 |
 | role | status | TINYINT | 否 | 1 | 状态: 0-禁用 1-启用 |
 | role | deleted | TINYINT | 否 | 0 | 逻辑删除 |
 | role | created_at | DATETIME | 否 | CURRENT_TIMESTAMP | 创建时间 |
@@ -937,6 +989,17 @@ mybatis-plus:
 | role_permission | role_id | BIGINT | 是 | - | 角色ID |
 | role_permission | permission_id | BIGINT | 是 | - | 权限ID |
 | role_permission | created_at | DATETIME | 否 | CURRENT_TIMESTAMP | 创建时间 |
+| permission_audit_log | id | BIGINT | 是 | 自增 | 主键 |
+| permission_audit_log | operator_user_id | BIGINT | 否 | NULL | 操作人用户ID |
+| permission_audit_log | action | VARCHAR(100) | 是 | - | 操作类型 |
+| permission_audit_log | target_type | VARCHAR(50) | 是 | - | 目标资源类型 |
+| permission_audit_log | target_id | VARCHAR(100) | 否 | NULL | 目标资源标识 |
+| permission_audit_log | before_data | LONGTEXT | 否 | NULL | 操作前非敏感数据(JSON) |
+| permission_audit_log | after_data | LONGTEXT | 否 | NULL | 操作后非敏感数据(JSON) |
+| permission_audit_log | source_ip | VARCHAR(64) | 否 | NULL | 来源IP |
+| permission_audit_log | success | TINYINT | 是 | - | 是否成功 |
+| permission_audit_log | failure_reason | VARCHAR(500) | 否 | NULL | 失败原因 |
+| permission_audit_log | created_at | DATETIME | 否 | CURRENT_TIMESTAMP | 创建时间 |
 | interview_comment | id | BIGINT | 是 | 自增 | 主键 |
 | interview_comment | share_id | BIGINT | 是 | - | 面经分享ID |
 | interview_comment | user_id | BIGINT | 是 | - | 评论者用户ID |
@@ -976,11 +1039,8 @@ mybatis-plus:
 | INTERVIEW | 面试笔记 |
 | QUESTION | 问题笔记 |
 
-**user.role:**
-| 值 | 说明 |
-|----|------|
-| 0 | 普通用户 (USER) |
-| 1 | 管理员 (ADMIN) |
+**用户角色：** 用户与角色是多对多关系，以 `user_role` 为唯一来源。内置角色编码为
+`user`、`admin`；管理员账号同时关联两者，权限通过 `role_permission` 取并集。
 
 **user.status:**
 | 值 | 说明 |
@@ -1020,7 +1080,6 @@ CREATE TABLE IF NOT EXISTS `user` (
     `nickname`      VARCHAR(50)     DEFAULT NULL                COMMENT '昵称',
     `email`         VARCHAR(100)    NOT NULL                    COMMENT '邮箱',
     `avatar`        VARCHAR(500)    DEFAULT NULL                COMMENT '头像URL',
-    `role`          TINYINT         DEFAULT 0                   COMMENT '角色: 0-普通用户 1-管理员',
     `status`        TINYINT         DEFAULT 1                   COMMENT '状态: 0-禁用 1-正常',
     `last_login_at` DATETIME        DEFAULT NULL                COMMENT '最后登录时间',
     `login_count`   INT             DEFAULT 0                   COMMENT '登录次数',
@@ -1110,7 +1169,7 @@ CREATE TABLE IF NOT EXISTS `ai_config` (
     `config_name`   VARCHAR(100)    NOT NULL                    COMMENT '配置名称',
     `provider`      VARCHAR(50)     NOT NULL                    COMMENT '模型提供商: openai/deepseek/aliyun/baidu',
     `model_name`    VARCHAR(100)    NOT NULL                    COMMENT '模型名称',
-    `api_key`       VARCHAR(500)    DEFAULT NULL                COMMENT 'API密钥(加密存储)',
+    `api_key`       VARCHAR(4096)   DEFAULT NULL                COMMENT 'API密钥(AES-256-GCM加密存储)',
     `api_endpoint`  VARCHAR(500)    DEFAULT NULL                COMMENT 'API端点地址',
     `config_type`   TINYINT         NOT NULL                    COMMENT '用途: 1-语音转文字 2-文本分析评分',
     `is_default`    TINYINT         DEFAULT 0                   COMMENT '是否默认: 0-否 1-是',
@@ -1182,6 +1241,7 @@ CREATE TABLE IF NOT EXISTS `role` (
     `id`         BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '角色ID',
     `role_name`  VARCHAR(50)  NOT NULL                    COMMENT '角色标识: admin/user',
     `role_label` VARCHAR(100) NOT NULL                    COMMENT '角色显示名称',
+    `is_system`  TINYINT      DEFAULT 0                   COMMENT '是否系统内置角色: 0-否 1-是',
     `status`     TINYINT      DEFAULT 1                   COMMENT '状态: 0-禁用 1-启用',
     `deleted`    TINYINT      DEFAULT 0                   COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '创建时间',
@@ -1194,7 +1254,7 @@ CREATE TABLE IF NOT EXISTS `role` (
 -- -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `permission` (
     `id`                BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '权限ID',
-    `permission_name`   VARCHAR(100) NOT NULL                    COMMENT '权限标识: user:list',
+    `permission_name`   VARCHAR(100) NOT NULL                    COMMENT '权限标识: user:read',
     `permission_label`  VARCHAR(200) NOT NULL                    COMMENT '权限显示名称',
     `created_at`        DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '创建时间',
     UNIQUE INDEX `uk_permission_name` (`permission_name`)
@@ -1237,33 +1297,34 @@ CREATE TABLE IF NOT EXISTS `interview_comment` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面经评论表';
 
 -- -----------------------------------------------------------
+-- 13. 权限与高风险操作审计日志表
+-- -----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `permission_audit_log` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '审计日志ID',
+    `operator_user_id` BIGINT DEFAULT NULL COMMENT '操作人用户ID；系统引导操作可为空',
+    `action` VARCHAR(100) NOT NULL COMMENT '操作类型',
+    `target_type` VARCHAR(50) NOT NULL COMMENT '目标资源类型',
+    `target_id` VARCHAR(100) DEFAULT NULL COMMENT '目标资源标识',
+    `before_data` LONGTEXT DEFAULT NULL COMMENT '操作前非敏感数据(JSON)',
+    `after_data` LONGTEXT DEFAULT NULL COMMENT '操作后非敏感数据(JSON)',
+    `source_ip` VARCHAR(64) DEFAULT NULL COMMENT '来源IP',
+    `success` TINYINT NOT NULL COMMENT '是否成功: 0-否 1-是',
+    `failure_reason` VARCHAR(500) DEFAULT NULL COMMENT '失败原因',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX `idx_operator_user_id` (`operator_user_id`),
+    INDEX `idx_action` (`action`),
+    INDEX `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限与高风险操作审计日志表';
+
+-- -----------------------------------------------------------
 -- 初始化数据
 -- -----------------------------------------------------------
 
--- 初始化角色数据
-INSERT INTO `role` (`id`, `role_name`, `role_label`) VALUES
-(1, 'admin', '管理员'),
-(2, 'user', '普通用户');
-
--- 初始化权限数据
-INSERT INTO `permission` (`id`, `permission_name`, `permission_label`) VALUES
-(1, 'user:list', '查看用户列表'),
-(2, 'user:manage', '管理用户账号'),
-(3, 'ai_config:list', '查看AI配置'),
-(4, 'ai_config:manage', '管理AI配置'),
-(5, 'interview:view_all', '查看所有面试数据'),
-(6, 'system:stats', '查看系统统计');
-
--- 管理员角色拥有所有权限
-INSERT INTO `role_permission` (`role_id`, `permission_id`) VALUES
-(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6);
-
--- 初始化管理员账号（密码: admin123，BCrypt 加密）
-INSERT INTO `user` (`username`, `password`, `nickname`, `email`, `role`)
-VALUES ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '管理员', 'admin@interview.com', 1);
-
--- 管理员关联 admin 角色
-INSERT INTO `user_role` (`user_id`, `role_id`) VALUES (1, 1);
+-- RBAC 初始化数据以 sql/schema.sql 为唯一可执行基准：
+-- 1. user 角色关联 7 项用户侧权限；
+-- 2. admin 角色关联 13 项管理侧增量权限；
+-- 3. 管理员账号同时关联 user、admin，权限取并集；
+-- 4. 不内置固定管理员密码，由 RBAC_BOOTSTRAP_ADMIN_* 安全引导创建。
 
 -- 初始化默认 AI 配置（DeepSeek）
 INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`)

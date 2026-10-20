@@ -5,6 +5,7 @@ import com.interview.auth.dto.*;
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
 import com.interview.auth.service.AuthService;
+import com.interview.auth.service.RbacService;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.UserStatus;
 import com.interview.common.exception.BusinessException;
@@ -15,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -37,6 +39,7 @@ public class AuthServiceImpl implements AuthService {
     private final RedisUtil redisUtil;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final RbacService rbacService;
 
     /**
      * Redis Key 前缀：邮箱验证码
@@ -129,6 +132,7 @@ public class AuthServiceImpl implements AuthService {
      * @param request 注册请求（邮箱、用户名、密码、验证码）
      */
     @Override
+    @Transactional
     public void register(RegisterRequest request) {
         String email = request.getEmail();
         String username = request.getUsername();
@@ -168,11 +172,11 @@ public class AuthServiceImpl implements AuthService {
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(password));
         user.setNickname(username);
-        user.setRole(0); // 0 = user, 1 = admin
         user.setStatus(UserStatus.ACTIVE.getCode());
         user.setLoginCount(0);
         user.setLastLoginAt(LocalDateTime.now());
         userMapper.insert(user);
+        rbacService.assignDefaultRole(user.getId());
 
         log.info("用户注册成功: {}", username);
     }
@@ -270,15 +274,15 @@ public class AuthServiceImpl implements AuthService {
                     ErrorCode.NOT_FOUND.getMessage());
         }
 
-        UserProfileResponse response = UserProfileResponse.builder()
+        return UserProfileResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
                 .avatar(user.getAvatar())
-                .role(user.getRole())
+                .roles(rbacService.getRoleCodes(userId))
+                .permissions(rbacService.getPermissionCodes(userId))
                 .build();
-        return response;
     }
 
     /**
@@ -383,7 +387,6 @@ public class AuthServiceImpl implements AuthService {
                 .email(user.getEmail())
                 .nickname(user.getNickname())
                 .avatar(user.getAvatar())
-                .role(user.getRole())
                 .build();
 
         LoginResponse response = LoginResponse.builder()

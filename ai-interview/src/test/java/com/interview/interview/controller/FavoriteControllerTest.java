@@ -54,7 +54,7 @@ class FavoriteControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "testuser",
-                        List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+                        List.of(new SimpleGrantedAuthority("favorite:manage"))));
     }
 
     // ==================== addFavorite 测试 ====================

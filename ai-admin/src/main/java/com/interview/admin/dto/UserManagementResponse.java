@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
 /**
  * 用户管理响应
@@ -28,8 +29,8 @@ public class UserManagementResponse {
     /** 昵称 */
     private String nickname;
 
-    /** 角色：0=普通用户, 1=管理员 */
-    private Integer role;
+    /** 当前账号关联的角色编码集合。 */
+    private Set<String> roles;
 
     /** 状态：0=禁用, 1=正常 */
     private Integer status;

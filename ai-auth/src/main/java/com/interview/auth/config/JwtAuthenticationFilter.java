@@ -2,6 +2,7 @@ package com.interview.auth.config;
 
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
+import com.interview.auth.service.RbacService;
 import com.interview.common.constant.UserStatus;
 import com.interview.common.utils.JwtUtil;
 import com.interview.common.utils.RedisUtil;
@@ -18,7 +19,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -35,6 +35,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final RedisUtil redisUtil;
     private final UserMapper userMapper;
+    private final RbacService rbacService;
 
     /**
      * 将有效 Bearer Token 转换为当前请求的认证上下文。
@@ -84,10 +85,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Long userId = jwtUtil.getUserId(token);
             String username = jwtUtil.getUsername(token);
 
-            // 根据数据库中的用户角色分配权限
-            List<SimpleGrantedAuthority> authorities = new ArrayList<>();
-            authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
-
             User user = userMapper.selectById(userId);
             if (user == null) {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -101,12 +98,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 response.getWriter().write("{\"code\":403,\"message\":\"账户已被禁用\"}");
                 return;
             }
-            if (user.getRole() != null && user.getRole() == 1) {
-                authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
-            }
+            // JWT 只证明身份，功能权限始终以数据库中的 RBAC 关系为准。
+            List<SimpleGrantedAuthority> authorities = rbacService.getPermissionCodes(userId).stream()
+                    .map(SimpleGrantedAuthority::new)
+                    .toList();
 
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(userId, username, authorities);
+            authentication.setDetails(username);
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
         }

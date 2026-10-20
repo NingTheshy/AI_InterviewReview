@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -56,7 +57,9 @@ class AdminUserControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "admin",
-                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+                        List.of(new SimpleGrantedAuthority("user:read"),
+                                new SimpleGrantedAuthority("user:status:update"),
+                                new SimpleGrantedAuthority("user:role:assign"))));
     }
 
     // ==================== 获取用户列表测试 ====================
@@ -153,7 +156,7 @@ class AdminUserControllerTest {
         @Test
         @DisplayName("更新用户状态成功")
         void updateUserStatus_Success() throws Exception {
-            doNothing().when(adminService).updateUserStatus(anyLong(), anyInt());
+            doNothing().when(adminService).updateUserStatus(anyLong(), anyLong(), anyInt());
 
             UserStatusRequest request = new UserStatusRequest();
             request.setStatus(0);
@@ -169,7 +172,7 @@ class AdminUserControllerTest {
         @DisplayName("更新用户状态 - 用户不存在")
         void updateUserStatus_NotFound() throws Exception {
             doThrow(new BusinessException(404, "资源不存在"))
-                    .when(adminService).updateUserStatus(eq(999L), anyInt());
+                    .when(adminService).updateUserStatus(anyLong(), eq(999L), anyInt());
 
             UserStatusRequest request = new UserStatusRequest();
             request.setStatus(0);
@@ -191,10 +194,10 @@ class AdminUserControllerTest {
         @Test
         @DisplayName("更新用户角色成功")
         void updateUserRole_Success() throws Exception {
-            doNothing().when(adminService).updateUserRole(anyLong(), anyInt());
+            doNothing().when(adminService).updateUserRoles(anyLong(), anyLong(), anySet());
 
             UserRoleRequest request = new UserRoleRequest();
-            request.setRole(1);
+            request.setRoles(Set.of("user", "admin"));
 
             mockMvc.perform(put("/admin/users/{id}/role", TEST_USER_ID)
                             .contentType("application/json")
@@ -207,10 +210,10 @@ class AdminUserControllerTest {
         @DisplayName("更新用户角色 - 用户不存在")
         void updateUserRole_NotFound() throws Exception {
             doThrow(new BusinessException(404, "资源不存在"))
-                    .when(adminService).updateUserRole(eq(999L), anyInt());
+                    .when(adminService).updateUserRoles(anyLong(), eq(999L), anySet());
 
             UserRoleRequest request = new UserRoleRequest();
-            request.setRole(1);
+            request.setRoles(Set.of("user", "admin"));
 
             mockMvc.perform(put("/admin/users/{id}/role", 999L)
                             .contentType("application/json")

@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,6 +37,7 @@ public class ShareController {
      */
     @Operation(summary = "生成分享链接/发布面经")
     @PostMapping("/interviews/{id}/share")
+    @PreAuthorize("hasAuthority('share:manage')")
     public Result<ShareResponse> createShare(@PathVariable Long id,
                                               @Valid @RequestBody ShareRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
@@ -51,6 +53,7 @@ public class ShareController {
      */
     @Operation(summary = "获取分享记录列表")
     @GetMapping("/interviews/{id}/shares")
+    @PreAuthorize("hasAuthority('share:manage')")
     public Result<List<ShareResponse>> listShares(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         return Result.success(shareService.listShares(id, userId));
@@ -64,6 +67,7 @@ public class ShareController {
      */
     @Operation(summary = "撤销分享链接/下架面经")
     @DeleteMapping("/shares/{token}")
+    @PreAuthorize("hasAuthority('share:manage')")
     public Result<Void> deleteShare(@PathVariable String token) {
         Long userId = SecurityUtils.getCurrentUserId();
         shareService.deleteShare(token, userId);
@@ -78,6 +82,7 @@ public class ShareController {
      */
     @Operation(summary = "切换面经公开状态")
     @PutMapping("/shares/{token}/public")
+    @PreAuthorize("hasAuthority('share:manage')")
     public Result<Void> togglePublic(@PathVariable String token) {
         Long userId = SecurityUtils.getCurrentUserId();
         shareService.togglePublic(token, userId);

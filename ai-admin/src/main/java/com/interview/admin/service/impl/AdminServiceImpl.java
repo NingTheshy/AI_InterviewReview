@@ -7,9 +7,12 @@ import com.interview.admin.dto.*;
 import com.interview.admin.service.AdminService;
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
+import com.interview.auth.service.AuditService;
+import com.interview.auth.service.RbacService;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
+import com.interview.common.utils.SecurityUtils;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewComment;
 import com.interview.interview.entity.InterviewShare;
@@ -19,12 +22,15 @@ import com.interview.interview.mapper.InterviewShareMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +48,8 @@ public class AdminServiceImpl implements AdminService {
     private final InterviewMapper interviewMapper;
     private final InterviewShareMapper interviewShareMapper;
     private final InterviewCommentMapper interviewCommentMapper;
+    private final RbacService rbacService;
+    private final AuditService auditService;
 
     // ==================== 用户管理 ====================
 
@@ -96,15 +104,22 @@ public class AdminServiceImpl implements AdminService {
      * {@inheritDoc}
      */
     @Override
-    public void updateUserStatus(Long userId, Integer status) {
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public void updateUserStatus(Long operatorUserId, Long userId, Integer status) {
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(),
                     ErrorCode.NOT_FOUND.getMessage());
         }
 
+        Integer beforeStatus = user.getStatus();
+        if (Integer.valueOf(0).equals(status) && !Integer.valueOf(0).equals(beforeStatus)) {
+            rbacService.assertCanDisableUser(operatorUserId, userId);
+        }
         user.setStatus(status);
         userMapper.updateById(user);
+        auditService.recordSuccess(operatorUserId, "USER_STATUS_UPDATE", "USER",
+                String.valueOf(userId), beforeStatus, status);
 
         log.info("管理员更新用户状态: userId={}, status={}", userId, status);
     }
@@ -113,17 +128,15 @@ public class AdminServiceImpl implements AdminService {
      * {@inheritDoc}
      */
     @Override
-    public void updateUserRole(Long userId, Integer role) {
+    public void updateUserRoles(Long operatorUserId, Long userId, Set<String> roleCodes) {
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(),
                     ErrorCode.NOT_FOUND.getMessage());
         }
 
-        user.setRole(role);
-        userMapper.updateById(user);
-
-        log.info("管理员更新用户角色: userId={}, role={}", userId, role);
+        rbacService.replaceUserRoles(operatorUserId, userId, roleCodes);
+        log.info("管理员更新用户角色: userId={}, roles={}", userId, roleCodes);
     }
 
     // ==================== 系统统计 ====================
@@ -275,6 +288,7 @@ public class AdminServiceImpl implements AdminService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional
     public void setExperienceStatus(String token, Integer isPublic) {
         LambdaQueryWrapper<InterviewShare> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InterviewShare::getShareToken, token);
@@ -285,8 +299,11 @@ public class AdminServiceImpl implements AdminService {
                     ErrorCode.SHARE_NOT_FOUND.getMessage());
         }
 
+        Integer beforeStatus = share.getIsPublic();
         share.setIsPublic(isPublic);
         interviewShareMapper.updateById(share);
+        auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "EXPERIENCE_STATUS_UPDATE",
+                "INTERVIEW_SHARE", String.valueOf(share.getId()), beforeStatus, isPublic);
 
         log.info("管理员设置面经状态: token={}, isPublic={}", token, isPublic);
     }
@@ -333,6 +350,7 @@ public class AdminServiceImpl implements AdminService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional
     public void deleteComment(Long commentId) {
         InterviewComment comment = interviewCommentMapper.selectById(commentId);
         if (comment == null) {
@@ -341,6 +359,9 @@ public class AdminServiceImpl implements AdminService {
         }
 
         interviewCommentMapper.deleteById(commentId);
+        auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "COMMENT_DELETE",
+                "INTERVIEW_COMMENT", String.valueOf(commentId),
+                Map.of("shareId", comment.getShareId(), "userId", comment.getUserId()), null);
         log.info("管理员删除评论: commentId={}", commentId);
     }
 
@@ -358,7 +379,7 @@ public class AdminServiceImpl implements AdminService {
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
-                .role(user.getRole())
+                .roles(rbacService.getRoleCodes(user.getId()))
                 .status(user.getStatus())
                 .loginCount(user.getLoginCount())
                 .lastLoginAt(user.getLastLoginAt())

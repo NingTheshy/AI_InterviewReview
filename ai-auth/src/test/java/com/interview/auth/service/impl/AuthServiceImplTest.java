@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.interview.auth.dto.*;
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
+import com.interview.auth.service.RbacService;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.UserStatus;
 import com.interview.common.exception.BusinessException;
@@ -48,6 +49,9 @@ class AuthServiceImplTest {
     @Mock
     private JwtUtil jwtUtil;
 
+    @Mock
+    private RbacService rbacService;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -66,7 +70,6 @@ class AuthServiceImplTest {
         testUser.setUsername(TEST_USERNAME);
         testUser.setPassword(TEST_PASSWORD);
         testUser.setNickname(TEST_USERNAME);
-        testUser.setRole(0);
         testUser.setStatus(UserStatus.ACTIVE.getCode());
         testUser.setLoginCount(0);
         testUser.setLastLoginAt(LocalDateTime.now());
@@ -124,13 +127,18 @@ class AuthServiceImplTest {
             when(redisUtil.get(anyString())).thenReturn(TEST_CODE);
             when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
             when(passwordEncoder.encode(anyString())).thenReturn("encoded_password");
-            when(userMapper.insert(any(User.class))).thenReturn(1);
+            when(userMapper.insert(any(User.class))).thenAnswer(invocation -> {
+                User inserted = invocation.getArgument(0);
+                inserted.setId(TEST_USER_ID);
+                return 1;
+            });
 
             // Act
             authService.register(request);
 
             // Assert
             verify(userMapper).insert(any(User.class));
+            verify(rbacService).assignDefaultRole(anyLong());
         }
 
         @Test

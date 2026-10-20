@@ -59,11 +59,13 @@ AI_InterviewReview/
 mysql -u root -p < sql/schema.sql
 ```
 
-已有旧版本数据库按历史版本执行相应升级脚本；当前版本涉及以下两项：
+已有旧版本数据库按顺序执行相应升级脚本；当前版本涉及以下四项：
 
 ```bash
 mysql -u root -p ai_interview < sql/upgrade_rubric_scoring.sql
 mysql -u root -p ai_interview < sql/upgrade_transcript_timestamps_and_notes.sql
+mysql -u root -p ai_interview < sql/upgrade_rbac_v1_5.sql
+mysql -u root -p ai_interview < sql/upgrade_security_p1_v1_6.sql
 ```
 
 第二个脚本会新增句子级转写字段，并将笔记唯一范围升级为：
@@ -71,6 +73,11 @@ mysql -u root -p ai_interview < sql/upgrade_transcript_timestamps_and_notes.sql
 ```text
 (interview_id, user_id, note_type, question_id)
 ```
+
+第三个脚本把旧 `user.role` 数据迁移到多角色 `user_role`，初始化 20 个权限码及
+`permission_audit_log`。执行前请备份数据库；升级完成后，角色和权限以关联表为唯一来源。
+第四个脚本扩充 AI API Key 密文字段；脚本执行后首次启动会自动把历史明文 Key 迁移为
+带 `enc:v1:` 前缀的 AES-256-GCM 密文。
 
 ### 2. 配置环境变量
 
@@ -88,6 +95,7 @@ REDIS_PASSWORD=your_redis_password
 JWT_SECRET=your_256_bit_secret_key_here
 DEEPSEEK_API_KEY=your_deepseek_api_key
 FUNASR_API_KEY=your_funasr_api_key
+AI_CONFIG_ENCRYPTION_KEY=replace_with_base64_encoded_32_byte_key
 FUNASR_PUBLIC_BASE_URL=https://api.example.com
 FUNASR_FILE_URL_SECRET=replace_with_a_long_random_secret
 ```
@@ -132,7 +140,7 @@ FunASR：整段单声道 WAV 转写 + 句子时间戳 + speakerId
 
 ## 接口概览
 
-项目共定义 **48 条业务 HTTP 路由**：普通业务与用户接口 31 条、管理员接口 16 条、FunASR 签名音频访问接口 1 条。Swagger、Knife4j 与 Druid 等基础设施地址不计入该数字。
+项目共定义 **49 条业务 HTTP 路由**：普通业务与用户接口 31 条、管理员接口 17 条、FunASR 签名音频访问接口 1 条。Swagger、Knife4j 与 Druid 等基础设施地址不计入该数字。
 
 | 分类 | 路径前缀 | 数量 | 说明 |
 |---|---|---:|---|
@@ -142,16 +150,19 @@ FunASR：整段单声道 WAV 转写 + 句子时间戳 + speakerId
 | 评论与收藏 | `/comments`、`/favorites` | 6 | 评论 CRUD、问题或面试收藏 |
 | 文件 | `/files`、`/asr-files` | 2 | 用户文件 Range 下载、FunASR 短时签名下载 |
 | AI 配置 | `/ai-configs` | 6 | 管理员维护模型配置与默认项 |
-| 管理后台 | `/admin/**` | 10 | 用户、统计、面试、面经和评论管理 |
+| 管理后台 | `/admin/**` | 11 | 用户、统计、面试、面经、评论和审计日志管理 |
 
 认证接口中的登录、注册和验证码发送公开；公开面经浏览及公开分享无需登录。`/asr-files/**` 不用于普通前端访问，专供 DashScope 通过 HMAC 短时签名读取音频。
 
 ## 安全边界
 
-- JWT 认证，Redis Token 黑名单，以及数据库实时角色和账户状态校验。
+- JWT 只携带身份，Redis 维护 Token 黑名单；每次请求从数据库实时加载权限和账户状态。
+- 接口按具体权限码授权，角色仅用于组织权限；业务服务继续校验资源归属，未明确授权则拒绝。
+- 最后管理者保护会阻止禁用或撤销系统中最后一个有效权限管理者。
 - 普通用户只能访问自己上传的文件、面试、笔记和分享记录。
 - FunASR 不携带用户 JWT，因此使用文件名与过期时间共同签名的 HMAC URL，且服务端拒绝路径穿越。
-- API Key、JWT 密钥和数据库密码仅放在 `.env` 或部署环境变量中；`.env` 已被 Git 忽略。
+- API Key、JWT 密钥、AI 配置加密主密钥和数据库密码仅放在 `.env` 或部署环境变量中；`.env` 已被 Git 忽略。
+- 数据库中的 AI API Key 使用 AES-256-GCM 加密；部署前必须为 `AI_CONFIG_ENCRYPTION_KEY` 配置独立的 32 字节 Base64 密钥。
 
 ## 文档
 
@@ -162,7 +173,7 @@ FunASR：整段单声道 WAV 转写 + 句子时间戳 + speakerId
 
 ## 验证
 
-当前全量测试结果：**313 tests，0 failures，0 errors**。
+当前全量测试结果：**341 tests，0 failures，0 errors**。
 
 ## License
 

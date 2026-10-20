@@ -1,7 +1,7 @@
 -- ============================================================
 -- AI 面试复盘系统 - 数据库建表脚本
--- 版本: v1.3 MVP
--- 日期: 2026-06-01
+-- 版本: v1.6 RBAC + P1 安全加固
+-- 日期: 2026-10-20
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS `ai_interview` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
@@ -17,7 +17,6 @@ CREATE TABLE `user` (
     `nickname` VARCHAR(50) COMMENT '昵称',
     `email` VARCHAR(100) NOT NULL COMMENT '邮箱',
     `avatar` VARCHAR(500) COMMENT '头像URL',
-    `role` TINYINT DEFAULT 0 COMMENT '角色: 0-普通用户 1-管理员',
     `status` TINYINT DEFAULT 1 COMMENT '状态: 0-禁用 1-正常',
     `last_login_at` DATETIME COMMENT '最后登录时间',
     `login_count` INT DEFAULT 0 COMMENT '登录次数',
@@ -174,7 +173,7 @@ CREATE TABLE `ai_config` (
     `config_name` VARCHAR(100) NOT NULL COMMENT '配置名称',
     `provider` VARCHAR(50) NOT NULL COMMENT '模型提供商: openai/deepseek/aliyun/baidu',
     `model_name` VARCHAR(100) NOT NULL COMMENT '模型名称',
-    `api_key` VARCHAR(500) COMMENT 'API密钥(加密存储)',
+    `api_key` VARCHAR(4096) COMMENT 'API密钥(AES-256-GCM加密存储)',
     `api_endpoint` VARCHAR(500) COMMENT 'API端点地址',
     `config_type` TINYINT NOT NULL COMMENT '用途: 1-语音转文字 2-文本分析评分',
     `is_default` TINYINT DEFAULT 0 COMMENT '是否默认: 0-否 1-是',
@@ -194,6 +193,7 @@ CREATE TABLE `role` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '角色ID',
     `role_name` VARCHAR(50) NOT NULL COMMENT '角色标识: admin/user',
     `role_label` VARCHAR(100) NOT NULL COMMENT '角色显示名称',
+    `is_system` TINYINT DEFAULT 0 COMMENT '是否系统内置角色: 0-否 1-是',
     `status` TINYINT DEFAULT 1 COMMENT '状态: 0-禁用 1-启用',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -206,7 +206,7 @@ CREATE TABLE `role` (
 -- -----------------------------------------------------------
 CREATE TABLE `permission` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '权限ID',
-    `permission_name` VARCHAR(100) NOT NULL COMMENT '权限标识: user:list',
+    `permission_name` VARCHAR(100) NOT NULL COMMENT '权限标识: user:read',
     `permission_label` VARCHAR(200) NOT NULL COMMENT '权限显示名称',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE INDEX `uk_permission_name` (`permission_name`)
@@ -234,36 +234,69 @@ CREATE TABLE `role_permission` (
     INDEX `idx_permission_id` (`permission_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色权限关联表';
 
+-- -----------------------------------------------------------
+-- 13. 权限与高风险操作审计日志表
+-- -----------------------------------------------------------
+CREATE TABLE `permission_audit_log` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '审计日志ID',
+    `operator_user_id` BIGINT COMMENT '操作人用户ID；系统引导操作可为空',
+    `action` VARCHAR(100) NOT NULL COMMENT '操作类型',
+    `target_type` VARCHAR(50) NOT NULL COMMENT '目标资源类型',
+    `target_id` VARCHAR(100) COMMENT '目标资源标识',
+    `before_data` LONGTEXT COMMENT '操作前非敏感数据(JSON)',
+    `after_data` LONGTEXT COMMENT '操作后非敏感数据(JSON)',
+    `source_ip` VARCHAR(64) COMMENT '来源IP',
+    `success` TINYINT NOT NULL COMMENT '是否成功: 0-否 1-是',
+    `failure_reason` VARCHAR(500) COMMENT '失败原因',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX `idx_operator_user_id` (`operator_user_id`),
+    INDEX `idx_action` (`action`),
+    INDEX `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限与高风险操作审计日志表';
+
 -- ============================================================
 -- 初始化数据
 -- ============================================================
 
 -- 初始化角色数据
-INSERT INTO `role` (`id`, `role_name`, `role_label`) VALUES
-(1, 'admin', '管理员'),
-(2, 'user', '普通用户');
+INSERT INTO `role` (`id`, `role_name`, `role_label`, `is_system`) VALUES
+(1, 'admin', '管理员', 1),
+(2, 'user', '普通用户', 1);
 
 -- 初始化权限数据
 INSERT INTO `permission` (`id`, `permission_name`, `permission_label`) VALUES
-(1, 'user:list', '查看用户列表'),
-(2, 'user:manage', '管理用户账号'),
-(3, 'ai_config:list', '查看AI配置'),
-(4, 'ai_config:manage', '管理AI配置'),
-(5, 'interview:view_all', '查看所有面试数据'),
-(6, 'experience:manage', '管理面经'),
-(7, 'comment:manage', '管理评论'),
-(8, 'system:stats', '查看系统统计');
+(1, 'interview:create', '创建面试复盘'),
+(2, 'interview:read', '查看本人面试复盘'),
+(3, 'interview:manage', '管理本人面试复盘'),
+(4, 'note:manage', '管理本人笔记'),
+(5, 'favorite:manage', '管理本人收藏'),
+(6, 'share:manage', '管理本人分享'),
+(7, 'comment:manage_own', '发表和管理本人评论'),
+(8, 'user:read', '查看用户'),
+(9, 'user:status:update', '更新用户状态'),
+(10, 'user:role:assign', '分配用户角色'),
+(11, 'interview:read_all', '查看全部面试数据'),
+(12, 'experience:read_all', '查看全部面经'),
+(13, 'experience:manage', '管理面经'),
+(14, 'comment:read_all', '查看全部评论'),
+(15, 'comment:manage', '管理任意评论'),
+(16, 'ai_config:read', '查看AI配置'),
+(17, 'ai_config:manage', '管理AI配置'),
+(18, 'system:stats:read', '查看系统统计'),
+(19, 'system:monitor:read', '查看系统监控'),
+(20, 'audit:read', '查看审计日志');
 
--- 管理员角色拥有所有权限
+-- 普通用户角色拥有用户侧权限
 INSERT INTO `role_permission` (`role_id`, `permission_id`) VALUES
-(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8);
+(2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7);
 
--- 初始化管理员账号（密码: admin123，BCrypt 加密）
-INSERT INTO `user` (`username`, `password`, `nickname`, `email`, `role`)
-VALUES ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '管理员', 'admin@example.com', 1);
+-- 管理员角色只声明管理侧增量权限；管理员账号同时关联 user 与 admin，权限取并集
+INSERT INTO `role_permission` (`role_id`, `permission_id`) VALUES
+(1, 8), (1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14),
+(1, 15), (1, 16), (1, 17), (1, 18), (1, 19), (1, 20);
 
--- 管理员关联 admin 角色
-INSERT INTO `user_role` (`user_id`, `role_id`) VALUES (1, 1);
+-- 不在 SQL 中内置固定管理员密码。应用在无有效权限管理者时读取
+-- RBAC_BOOTSTRAP_ADMIN_* 环境变量创建首个同时拥有 user、admin 角色的账号。
 
 -- 初始化默认 AI 配置（DeepSeek 文本分析）
 INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `sort_order`)
@@ -273,7 +306,7 @@ VALUES ('DeepSeek 文本分析', 'deepseek', 'deepseek-chat', 'https://api.deeps
 INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `sort_order`)
 VALUES ('Whisper 语音转文字', 'openai', 'whisper-1', 'https://api.openai.com/v1', 1, 0, 2);
 
--- 初始化默认 AI 配置（FunASR 实时语音识别）
+-- 初始化默认 AI 配置（FunASR 非实时语音识别）
 INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `sort_order`)
 VALUES ('FunASR 语音识别', 'funasr', 'paraformer-v2', 'https://dashscope.aliyuncs.com/api/v1', 1, 1, 1);
 

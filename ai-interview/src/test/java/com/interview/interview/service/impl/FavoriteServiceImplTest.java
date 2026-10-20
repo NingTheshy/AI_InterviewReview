@@ -6,6 +6,7 @@ import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import com.interview.interview.entity.InterviewFavorite;
 import com.interview.interview.mapper.InterviewFavoriteMapper;
+import com.interview.interview.service.InterviewResourceAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -30,6 +31,9 @@ class FavoriteServiceImplTest {
 
     @Mock
     private InterviewFavoriteMapper favoriteMapper;
+
+    @Mock
+    private InterviewResourceAccessService resourceAccessService;
 
     @InjectMocks
     private FavoriteServiceImpl favoriteService;
@@ -63,6 +67,8 @@ class FavoriteServiceImplTest {
 
             favoriteService.addFavorite(TEST_USER_ID, TEST_INTERVIEW_ID, TEST_QUESTION_ID, "好问题");
 
+            verify(resourceAccessService).requireVisibleQuestion(
+                    TEST_INTERVIEW_ID, TEST_QUESTION_ID, TEST_USER_ID);
             verify(favoriteMapper).insert(any(InterviewFavorite.class));
         }
 
@@ -85,6 +91,7 @@ class FavoriteServiceImplTest {
 
             favoriteService.addFavorite(TEST_USER_ID, TEST_INTERVIEW_ID, null, null);
 
+            verify(resourceAccessService).requireVisibleInterview(TEST_INTERVIEW_ID, TEST_USER_ID);
             verify(favoriteMapper).insert(any(InterviewFavorite.class));
         }
     }

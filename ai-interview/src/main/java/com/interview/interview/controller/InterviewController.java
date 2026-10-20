@@ -10,6 +10,7 @@ import com.interview.interview.service.InterviewService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import jakarta.validation.constraints.NotBlank;
@@ -43,6 +44,7 @@ public class InterviewController {
      */
     @Operation(summary = "上传面试")
     @PostMapping("/upload")
+    @PreAuthorize("hasAuthority('interview:create')")
     public Result<Long> upload(
             @RequestParam("audioFile") MultipartFile audioFile,
             @RequestParam(value = "resumeFile") MultipartFile resumeFile,
@@ -71,6 +73,7 @@ public class InterviewController {
      */
     @Operation(summary = "获取面试记录列表")
     @GetMapping
+    @PreAuthorize("hasAuthority('interview:read')")
     public Result<PageResult<InterviewListResponse>> list(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -92,6 +95,7 @@ public class InterviewController {
      */
     @Operation(summary = "获取面试详情")
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('interview:read')")
     public Result<InterviewDetailResponse> getDetail(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         return Result.success(interviewService.getDetail(id, userId));
@@ -105,6 +109,7 @@ public class InterviewController {
      */
     @Operation(summary = "删除面试记录")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('interview:manage')")
     public Result<Void> delete(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         interviewService.delete(id, userId);
@@ -119,6 +124,7 @@ public class InterviewController {
      */
     @Operation(summary = "查询处理进度")
     @GetMapping("/{id}/status")
+    @PreAuthorize("hasAuthority('interview:read')")
     public Result<InterviewStatusResponse> getStatus(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         return Result.success(interviewService.getStatus(id, userId));
@@ -132,6 +138,7 @@ public class InterviewController {
      */
     @Operation(summary = "重新处理失败的面试")
     @PostMapping("/{id}/retry")
+    @PreAuthorize("hasAuthority('interview:manage')")
     public Result<Void> retry(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         interviewService.retry(id, userId);

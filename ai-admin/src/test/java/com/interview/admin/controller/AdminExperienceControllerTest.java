@@ -55,7 +55,8 @@ class AdminExperienceControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "admin",
-                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+                        List.of(new SimpleGrantedAuthority("experience:read_all"),
+                                new SimpleGrantedAuthority("experience:manage"))));
     }
 
     // ==================== 获取面经列表测试 ====================

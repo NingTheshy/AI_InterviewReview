@@ -56,7 +56,7 @@ class ShareControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "testuser",
-                        List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+                        List.of(new SimpleGrantedAuthority("share:manage"))));
     }
 
     // ==================== createShare 测试 ====================

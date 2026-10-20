@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.interview.common.constant.NoteType;
 import com.interview.interview.entity.InterviewNote;
 import com.interview.interview.mapper.InterviewNoteMapper;
+import com.interview.interview.service.InterviewResourceAccessService;
 import com.interview.interview.service.NoteService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,7 @@ public class NoteServiceImpl implements NoteService {
     private static final long INTERVIEW_NOTE_QUESTION_SCOPE = 0L;
 
     private final InterviewNoteMapper noteMapper;
+    private final InterviewResourceAccessService resourceAccessService;
 
     /**
      * {@inheritDoc}
@@ -40,6 +42,7 @@ public class NoteServiceImpl implements NoteService {
      */
     @Override
     public String getInterviewNote(Long interviewId, Long userId) {
+        resourceAccessService.requireOwnedInterview(interviewId, userId);
         LambdaQueryWrapper<InterviewNote> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InterviewNote::getInterviewId, interviewId);
         wrapper.eq(InterviewNote::getUserId, userId);
@@ -58,6 +61,7 @@ public class NoteServiceImpl implements NoteService {
      */
     @Override
     public void saveInterviewNote(Long interviewId, Long userId, String content) {
+        resourceAccessService.requireOwnedInterview(interviewId, userId);
         LambdaQueryWrapper<InterviewNote> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InterviewNote::getInterviewId, interviewId);
         wrapper.eq(InterviewNote::getUserId, userId);
@@ -90,6 +94,7 @@ public class NoteServiceImpl implements NoteService {
      */
     @Override
     public String getQuestionNote(Long interviewId, Long questionId, Long userId) {
+        resourceAccessService.requireOwnedQuestion(interviewId, questionId, userId);
         LambdaQueryWrapper<InterviewNote> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InterviewNote::getInterviewId, interviewId);
         wrapper.eq(InterviewNote::getQuestionId, questionId);
@@ -108,6 +113,7 @@ public class NoteServiceImpl implements NoteService {
      */
     @Override
     public void saveQuestionNote(Long interviewId, Long questionId, Long userId, String content) {
+        resourceAccessService.requireOwnedQuestion(interviewId, questionId, userId);
         LambdaQueryWrapper<InterviewNote> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InterviewNote::getInterviewId, interviewId);
         wrapper.eq(InterviewNote::getQuestionId, questionId);

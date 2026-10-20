@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.interview.common.constant.NoteType;
 import com.interview.interview.entity.InterviewNote;
 import com.interview.interview.mapper.InterviewNoteMapper;
+import com.interview.interview.service.InterviewResourceAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -26,6 +27,9 @@ class NoteServiceImplTest {
 
     @Mock
     private InterviewNoteMapper noteMapper;
+
+    @Mock
+    private InterviewResourceAccessService resourceAccessService;
 
     @InjectMocks
     private NoteServiceImpl noteService;
@@ -50,6 +54,7 @@ class NoteServiceImplTest {
             String result = noteService.getInterviewNote(TEST_INTERVIEW_ID, TEST_USER_ID);
 
             assertEquals("面试笔记内容", result);
+            verify(resourceAccessService).requireOwnedInterview(TEST_INTERVIEW_ID, TEST_USER_ID);
         }
 
         @Test
@@ -140,6 +145,8 @@ class NoteServiceImplTest {
 
             noteService.saveQuestionNote(TEST_INTERVIEW_ID, TEST_QUESTION_ID, TEST_USER_ID, "新笔记");
 
+            verify(resourceAccessService).requireOwnedQuestion(
+                    TEST_INTERVIEW_ID, TEST_QUESTION_ID, TEST_USER_ID);
             verify(noteMapper).insert(any(InterviewNote.class));
         }
 

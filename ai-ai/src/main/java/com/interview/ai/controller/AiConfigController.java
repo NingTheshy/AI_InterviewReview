@@ -23,13 +23,13 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/ai-configs")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
 public class AiConfigController {
 
     private final AiConfigService aiConfigService;
 
     @Operation(summary = "获取 AI 配置列表")
     @GetMapping
+    @PreAuthorize("hasAuthority('ai_config:read')")
     public Result<PageResult<AiConfigResponse>> list(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
@@ -42,12 +42,14 @@ public class AiConfigController {
 
     @Operation(summary = "获取单个配置详情")
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('ai_config:read')")
     public Result<AiConfigResponse> getDetail(@PathVariable Long id) {
         return Result.success(toResponse(aiConfigService.getDetail(id)));
     }
 
     @Operation(summary = "新增 AI 模型配置")
     @PostMapping
+    @PreAuthorize("hasAuthority('ai_config:manage')")
     public Result<Void> create(@Valid @RequestBody AiConfigRequest request) {
         AiConfig config = new AiConfig();
         config.setConfigName(request.getConfigName());
@@ -64,6 +66,7 @@ public class AiConfigController {
 
     @Operation(summary = "更新 AI 模型配置")
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ai_config:manage')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody AiConfigRequest request) {
         AiConfig config = new AiConfig();
         config.setConfigName(request.getConfigName());
@@ -80,6 +83,7 @@ public class AiConfigController {
 
     @Operation(summary = "删除 AI 模型配置")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ai_config:manage')")
     public Result<Void> delete(@PathVariable Long id) {
         aiConfigService.delete(id);
         return Result.success();
@@ -87,6 +91,7 @@ public class AiConfigController {
 
     @Operation(summary = "设为默认配置")
     @PutMapping("/{id}/default")
+    @PreAuthorize("hasAuthority('ai_config:manage')")
     public Result<Void> setDefault(@PathVariable Long id) {
         aiConfigService.setDefault(id);
         return Result.success();

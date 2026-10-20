@@ -3,6 +3,8 @@ package com.interview.admin.service;
 import com.interview.admin.dto.*;
 import com.interview.common.result.PageResult;
 
+import java.util.Set;
+
 /**
  * 管理员服务接口
  * <p>
@@ -41,16 +43,16 @@ public interface AdminService {
      * @param status 状态值（0-禁用，1-正常）
      * @throws com.interview.common.exception.BusinessException 用户不存在时抛出
      */
-    void updateUserStatus(Long userId, Integer status);
+    void updateUserStatus(Long operatorUserId, Long userId, Integer status);
 
     /**
      * 更新用户角色
      *
      * @param userId 用户 ID
-     * @param role   角色值（0-user，1-admin）
+     * @param roleCodes 角色编码集合；空集合自动回退为 user
      * @throws com.interview.common.exception.BusinessException 用户不存在时抛出
      */
-    void updateUserRole(Long userId, Integer role);
+    void updateUserRoles(Long operatorUserId, Long userId, Set<String> roleCodes);
 
     // ==================== 系统统计 ====================
 

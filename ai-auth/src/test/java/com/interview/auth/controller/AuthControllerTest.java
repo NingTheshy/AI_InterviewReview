@@ -63,7 +63,7 @@ class AuthControllerTest {
         // 设置安全上下文，模拟已认证用户
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "testuser",
-                        List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+                        List.of(new SimpleGrantedAuthority("interview:read"))));
     }
 
     // ==================== 发送验证码测试 ====================
@@ -254,7 +254,6 @@ class AuthControllerTest {
                     .username("testuser")
                     .email("test@example.com")
                     .nickname("Test User")
-                    .role(0)
                     .build();
 
             LoginResponse response = LoginResponse.builder()
@@ -378,7 +377,8 @@ class AuthControllerTest {
                     .email("test@example.com")
                     .nickname("Test User")
                     .avatar("avatar.jpg")
-                    .role(0)
+                    .roles(java.util.Set.of("user"))
+                    .permissions(java.util.Set.of("interview:read"))
                     .build();
 
             when(authService.getProfile(anyLong())).thenReturn(response);

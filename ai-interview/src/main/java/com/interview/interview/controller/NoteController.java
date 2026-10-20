@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -22,6 +23,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/interviews")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('note:manage')")
 public class NoteController {
 
     private final NoteService noteService;

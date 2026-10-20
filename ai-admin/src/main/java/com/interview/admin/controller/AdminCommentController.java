@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/admin/comments")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
 public class AdminCommentController {
 
     private final AdminService adminService;
@@ -36,6 +35,7 @@ public class AdminCommentController {
      */
     @Operation(summary = "获取评论列表")
     @GetMapping
+    @PreAuthorize("hasAuthority('comment:read_all')")
     public Result<PageResult<CommentManagementResponse>> listComments(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -51,6 +51,7 @@ public class AdminCommentController {
      */
     @Operation(summary = "删除评论")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('comment:manage')")
     public Result<Void> deleteComment(@PathVariable Long id) {
         adminService.deleteComment(id);
         return Result.success();

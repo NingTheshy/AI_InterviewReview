@@ -9,6 +9,7 @@ import com.interview.interview.dto.FavoriteResponse;
 import com.interview.interview.entity.InterviewFavorite;
 import com.interview.interview.mapper.InterviewFavoriteMapper;
 import com.interview.interview.service.FavoriteService;
+import com.interview.interview.service.InterviewResourceAccessService;
 import lombok.RequiredArgsConstructor;
 
 import java.util.List;
@@ -33,6 +34,7 @@ import org.springframework.stereotype.Service;
 public class FavoriteServiceImpl implements FavoriteService {
 
     private final InterviewFavoriteMapper favoriteMapper;
+    private final InterviewResourceAccessService resourceAccessService;
 
     /**
      * 每个用户的收藏上限
@@ -50,6 +52,12 @@ public class FavoriteServiceImpl implements FavoriteService {
      */
     @Override
     public void addFavorite(Long userId, Long interviewId, Long questionId, String remark) {
+        if (questionId == null) {
+            resourceAccessService.requireVisibleInterview(interviewId, userId);
+        } else {
+            resourceAccessService.requireVisibleQuestion(interviewId, questionId, userId);
+        }
+
         // 检查收藏上限
         LambdaQueryWrapper<InterviewFavorite> countWrapper = new LambdaQueryWrapper<>();
         countWrapper.eq(InterviewFavorite::getUserId, userId);
@@ -64,6 +72,8 @@ public class FavoriteServiceImpl implements FavoriteService {
         wrapper.eq(InterviewFavorite::getInterviewId, interviewId);
         if (questionId != null) {
             wrapper.eq(InterviewFavorite::getQuestionId, questionId);
+        } else {
+            wrapper.isNull(InterviewFavorite::getQuestionId);
         }
 
         if (favoriteMapper.selectCount(wrapper) > 0) {

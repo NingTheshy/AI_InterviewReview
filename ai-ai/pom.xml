@@ -21,6 +21,10 @@
             <groupId>com.interview</groupId>
             <artifactId>ai-common</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.interview</groupId>
+            <artifactId>ai-auth</artifactId>
+        </dependency>
 
         <!-- Spring WebFlux (用于 AI 模型异步调用) -->
         <dependency>

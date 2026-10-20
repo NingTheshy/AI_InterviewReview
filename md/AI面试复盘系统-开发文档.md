@@ -1,7 +1,7 @@
 # AI 面试复盘系统 - 开发文档
 
-> 版本: v2.0  
-> 日期: 2026-06-07  
+> 版本: v2.1
+> 日期: 2026-10-20
 > 适用对象: 项目开发人员、运维人员、技术负责人
 
 > 评分实现更新：本文后续关于阶梯制评分和 `SCORING_TWO_PHASE` 的描述属于旧版本。当前处理流程为“识别问答 → 生成满分答案与量表 → 逐项比对 → 服务端计分 → 整场汇总”，以根目录 `README.md` 和 `RubricScoringService` 为准。已有数据库需先执行 `sql/upgrade_rubric_scoring.sql`。
@@ -977,12 +977,15 @@ VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliy
 6. 后续请求携带 Header: Authorization: Bearer {token}
 ```
 
-**权限控制：**
+**权限控制：** `user_role` 支持一个账号关联多个角色，`role_permission` 负责组织权限。
+接口通过具体权限码授权，业务服务继续校验资源归属和状态；未明确授权时默认拒绝。
+管理员账号同时关联 `user`、`admin`，两者权限取并集，不存在基于角色名的管理员绕过。
+笔记和收藏通过统一的 `InterviewResourceAccessService` 校验面试所有权、公开可见性以及问题归属。
+授权集成测试加载真实 `SecurityFilterChain`、JWT 过滤器和方法安全代理，覆盖 401、403、授权成功、实时撤权和账号禁用。
 
-| 角色 | 标识 | 说明 |
-|------|------|------|
-| 管理员 | ROLE_ADMIN | 拥有系统所有权限（user.role = 1） |
-| 普通用户 | ROLE_USER | 仅访问自身数据（user.role = 0） |
+**AI 配置密钥：** 数据库中的 API Key 使用 AES-256-GCM 加密，每次加密生成独立随机 IV，
+密文使用 `enc:v1:` 前缀。主密钥由 `AI_CONFIG_ENCRYPTION_KEY` 提供；应用启动时会迁移历史明文，
+并验证已有密文能否使用当前主密钥解密。旧库需先执行 `sql/upgrade_security_p1_v1_6.sql`。
 
 **接口列表：**
 
@@ -1043,31 +1046,32 @@ VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliy
 
 ### 9.6 管理模块 (ai-admin)
 
-**权限说明**：所有管理员接口通过 `@PreAuthorize("hasRole('ADMIN')")` 进行角色级访问控制，即 `user.role=1` 的用户拥有全部管理权限。数据库 `permission` 表中定义的细粒度权限标识（如 `user:list`、`user:manage`）目前仅用于数据记录，实际鉴权以角色为准。
+**权限说明**：所有管理接口通过 `@PreAuthorize("hasAuthority('权限码')")` 进行功能授权；管理员也必须经由 `role_permission` 获得每一项权限。角色分配禁止修改自己、禁止越权授权，并启用最后管理者保护。
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | /admin/users | 用户列表 | user:list |
-| GET | /admin/users/{id} | 用户详情 | user:list |
-| PUT | /admin/users/{id}/status | 禁用/启用用户 | user:manage |
-| PUT | /admin/users/{id}/role | 修改用户角色 | user:manage |
-| GET | /admin/stats/overview | 系统统计 | system:stats |
-| GET | /admin/interviews | 所有面试数据 | interview:view_all |
-| GET | /admin/experiences | 所有面经 | experience:manage |
+| GET | /admin/users | 用户列表 | user:read |
+| GET | /admin/users/{id} | 用户详情 | user:read |
+| PUT | /admin/users/{id}/status | 禁用/启用用户 | user:status:update |
+| PUT | /admin/users/{id}/role | 修改用户角色集合 | user:role:assign |
+| GET | /admin/stats/overview | 系统统计 | system:stats:read |
+| GET | /admin/interviews | 所有面试数据 | interview:read_all |
+| GET | /admin/experiences | 所有面经 | experience:read_all |
 | PUT | /admin/experiences/{token}/status | 下架/恢复面经 | experience:manage |
-| GET | /admin/comments | 所有评论 | comment:manage |
+| GET | /admin/comments | 所有评论 | comment:read_all |
 | DELETE | /admin/comments/{id} | 删除评论 | comment:manage |
+| GET | /admin/audit-logs | 权限与高风险操作审计日志 | audit:read |
 
 ### 9.7 AI 配置管理
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | /ai-configs | AI 配置列表 | ADMIN |
-| GET | /ai-configs/{id} | 配置详情 | ADMIN |
-| POST | /ai-configs | 新增配置 | ADMIN |
-| PUT | /ai-configs/{id} | 更新配置 | ADMIN |
-| DELETE | /ai-configs/{id} | 删除配置 | ADMIN |
-| PUT | /ai-configs/{id}/default | 设为默认 | ADMIN |
+| GET | /ai-configs | AI 配置列表 | ai_config:read |
+| GET | /ai-configs/{id} | 配置详情 | ai_config:read |
+| POST | /ai-configs | 新增配置 | ai_config:manage |
+| PUT | /ai-configs/{id} | 更新配置 | ai_config:manage |
+| DELETE | /ai-configs/{id} | 删除配置 | ai_config:manage |
+| PUT | /ai-configs/{id}/default | 设为默认 | ai_config:manage |
 
 ---
 

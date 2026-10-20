@@ -52,7 +52,8 @@ class AdminCommentControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "admin",
-                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+                        List.of(new SimpleGrantedAuthority("comment:read_all"),
+                                new SimpleGrantedAuthority("comment:manage"))));
     }
 
     // ==================== 获取评论列表测试 ====================

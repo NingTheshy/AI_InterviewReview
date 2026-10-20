@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -28,6 +29,7 @@ public class FileController {
 
     /** 返回当前用户拥有的音频或简历文件，支持单区间断点读取。 */
     @GetMapping("/files/{filename:.+}")
+    @PreAuthorize("hasAuthority('interview:read')")
     public ResponseEntity<StreamingResponseBody> serveFile(
             @PathVariable String filename,
             @RequestHeader(value = "Range", required = false) String rangeHeader) {

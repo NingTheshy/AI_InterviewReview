@@ -51,7 +51,7 @@ class AdminInterviewControllerTest {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(TEST_USER_ID, "admin",
-                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+                        List.of(new SimpleGrantedAuthority("interview:read_all"))));
     }
 
     // ==================== 获取面试列表测试 ====================

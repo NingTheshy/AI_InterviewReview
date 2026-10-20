@@ -15,6 +15,7 @@
 
 # ==================== Java / Maven ====================
 **/target/
+.maven-repo/
 *.class
 *.jar
 *.war

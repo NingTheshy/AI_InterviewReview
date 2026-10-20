@@ -23,7 +23,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/admin/experiences")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
 public class AdminExperienceController {
 
     private final AdminService adminService;
@@ -37,6 +36,7 @@ public class AdminExperienceController {
      */
     @Operation(summary = "获取面经列表")
     @GetMapping
+    @PreAuthorize("hasAuthority('experience:read_all')")
     public Result<PageResult<ExperienceManagementResponse>> listExperiences(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
@@ -52,6 +52,7 @@ public class AdminExperienceController {
      */
     @Operation(summary = "设置面经状态")
     @PutMapping("/{token}/status")
+    @PreAuthorize("hasAuthority('experience:manage')")
     public Result<Void> setExperienceStatus(
             @PathVariable String token,
             @Valid @RequestBody ExperienceStatusRequest request) {
