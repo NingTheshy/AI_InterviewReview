@@ -75,18 +75,17 @@ class InterviewControllerTest {
         void upload_Success() throws Exception {
             MockMultipartFile audioFile = new MockMultipartFile(
                     "audioFile", "test.wav", "audio/wav", "audio content".getBytes());
-            MockMultipartFile resumeFile = new MockMultipartFile(
-                    "resumeFile", "resume.pdf", "application/pdf", "resume content".getBytes());
-
             when(interviewService.upload(anyLong(), any(), any(), anyString(),
                     any(), any(), any(), any(), any())).thenReturn(TEST_INTERVIEW_ID);
 
             mockMvc.perform(multipart("/interviews/upload")
                             .file(audioFile)
-                            .file(resumeFile)
+                            .param("resumeId", "9")
                             .param("jdText", "Java 后端开发")
                             .param("title", "面试标题")
-                            .param("companyName", "阿里巴巴"))
+                            .param("companyName", "阿里巴巴")
+                            .param("positionTitle", "Java工程师")
+                            .param("interviewType", "coding"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").value(TEST_INTERVIEW_ID));
@@ -113,7 +112,7 @@ class InterviewControllerTest {
             PageResult<InterviewListResponse> pageResult = new PageResult<>(
                     List.of(item), 1, 1, 10);
             when(interviewService.list(anyLong(), anyInt(), anyInt(),
-                    any(), any(), any(), any(), any())).thenReturn(pageResult);
+                    any(), any(), any(), any(), any(), any(), any())).thenReturn(pageResult);
 
             mockMvc.perform(get("/interviews")
                             .param("page", "1")

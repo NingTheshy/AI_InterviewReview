@@ -4,10 +4,12 @@
 | --- | --- |
 | 项目名称 | AI InterviewReview（AI 面试复盘系统） |
 | 文档类型 | 类设计说明书 / BCE 分析类设计 |
-| 文档版本 | V1.1 |
-| 编制日期 | 2026-10-20 |
+| 文档版本 | V1.2 |
+| 编制日期 | 2026-10-21 |
 | 适用范围 | 后端 `AI_InterviewReview` 与前端 `AI_InterviewReview_front` |
 | 设计依据 | 当前 Java、Vue 源码，数据库初始化脚本及模块配置 |
+
+> **当前类模型基线：** `InterviewExperience` 负责数字 ID 公开面经；`ResumeAsyncService` 负责异步简历解析，`InterviewAsyncService` 负责带租约的分阶段 AI 处理，`InterviewCleanupService` 负责事务清理，`QuestionStandardCacheService` 负责通用与个人标准答案隔离缓存。系统不提供私密分享或分享 Token。
 
 ## 1. 文档目的
 
@@ -26,7 +28,7 @@
 | --- | --- | --- |
 | `ai-common` | 公共实体基类、返回模型、枚举、异常、工具与通用配置 | `BaseEntity`、`Result`、`PageResult`、`SecurityUtils` |
 | `ai-auth` | 注册、登录、个人资料、密码、JWT 鉴权 | `User`、`AuthController`、`AuthServiceImpl` |
-| `ai-interview` | 面试上传、异步复盘、题目、笔记、收藏、分享、面经与评论 | `Interview`、`InterviewQuestion`、各业务 Controller/Service |
+| `ai-interview` | 简历、面试上传、异步复盘、题目、笔记、收藏、面经与评论 | `UserResume`、`Interview`、`InterviewQuestion`、各业务 Controller/Service |
 | `ai-ai` | AI 配置、ASR 转写、LLM 评分、公司分级、模型客户端选择 | `AiConfig`、`AiConfigServiceImpl`、`AiClientFactory` |
 | `ai-admin` | 用户、面试、公开面经、评论和统计管理 | 管理端 Controller、`AdminServiceImpl` |
 | `ai-web` | 应用启动、数据源与运行配置 | `AiInterviewApplication`、`DataSourceConfig` |
@@ -44,7 +46,7 @@
 
 ### 3.2 数量概览
 
-- 持久化实体类：8 个具体实体，加 1 个公共基类。
+- 持久化实体类：13 个具体实体，加 1 个公共基类。
 - REST 控制器：14 个；在工程分层中属于 HTTP 接入边界，在 MVC 命名中称 Controller。
 - 核心控制类：17 个，包括业务 Service 实现、异步编排、评分解析和 AI 工厂。
 - 业务页面边界：16 个 Vue 页面；另有 `404.vue`、布局组件和路由守卫等技术边界。
@@ -71,12 +73,14 @@
 | 实体类 | 数据表 | 核心属性 | 主要职责 |
 | --- | --- | --- | --- |
 | `User` | `user` | `username`、`password`、`nickname`、`email`、`avatar`、`role`、`status`、`lastLoginAt`、`loginCount` | 表达用户身份、登录状态和简化角色信息 |
+| `UserResume` | `user_resume` | `userId`、文件元数据、`contentHash`、解析状态、正文、任务令牌和租约 | 保存用户可复用、不可变的简历版本及异步解析状态 |
 | `Interview` | `interview` | `userId`、标题/公司/岗位/行业/类型、音频/简历/JD、转写文本、五维评分、优缺点、状态、处理步骤 | 面试复盘聚合根，承载上传资料、AI 过程状态及最终总结 |
 | `InterviewQuestion` | `interview_question` | `interviewId`、问题序号、问答文本、说话人、起止时间、逐题评分、建议、参考答案、评分量表 | 表达一次面试中识别出的单个问答及逐题分析结果 |
 | `InterviewNote` | `interview_note` | `interviewId`、`userId`、`noteContent`、`noteType`、`questionId` | 保存面试级或问题级用户笔记 |
 | `InterviewFavorite` | `interview_favorite` | `userId`、`interviewId`、`questionId`、`remark` | 保存用户对问题的收藏及备注 |
-| `InterviewShare` | `interview_share` | `interviewId`、`userId`、`shareToken`、`expireAt`、`isPublic`、`viewCount` | 保存分享链接、有效期和公开面经状态 |
-| `InterviewComment` | `interview_comment` | `shareId`、`userId`、`content` | 保存用户对公开面经的评论 |
+| `InterviewExperience` | `interview_experience` | `interviewId`、`userId`、`summaryMarkdown`、`publishStatus`、`moderationStatus`、`viewCount` | 保存唯一公开面经及用户/管理员双状态 |
+| `InterviewComment` | `interview_comment` | `experienceId`、`userId`、`content` | 保存用户对公开面经的评论 |
+| `QuestionStandardCache` | `question_standard_cache` | `cacheKey`、作用域、上下文摘要、模型/配置/提示词版本、标准答案和 Rubric | 隔离复用通用与个性化标准答案 |
 | `AiConfig` | `ai_config` | `configName`、`provider`、`modelName`、`apiKey`、`apiEndpoint`、`configType`、`isDefault`、`sortOrder`、`status` | 保存 ASR/LLM 供应商、模型和调用配置 |
 
 ### 4.3 实体关联关系
@@ -84,6 +88,8 @@
 | 主实体 | 从实体 | 基数 | 关联键 | 说明 |
 | --- | --- | --- | --- | --- |
 | `User` | `Interview` | 1:N | `Interview.userId` | 一个用户拥有多场面试；私有接口必须校验所有权 |
+| `User` | `UserResume` | 1:N | `UserResume.userId` | 一个用户拥有多个不可变简历版本 |
+| `UserResume` | `Interview` | 1:N | `Interview.resumeId` | 新面试只能绑定可用简历；历史面试同时保存正文快照 |
 | `Interview` | `InterviewQuestion` | 1:N | `InterviewQuestion.interviewId` | 一场面试按 `questionIndex` 包含多条问答 |
 | `Interview` | `InterviewNote` | 1:N | `InterviewNote.interviewId` | 可保存面试级和问题级笔记 |
 | `User` | `InterviewNote` | 1:N | `InterviewNote.userId` | 笔记属于当前用户 |
@@ -91,9 +97,9 @@
 | `User` | `InterviewFavorite` | 1:N | `InterviewFavorite.userId` | 收藏属于用户 |
 | `Interview` | `InterviewFavorite` | 1:N | `InterviewFavorite.interviewId` | 收藏保留面试上下文 |
 | `InterviewQuestion` | `InterviewFavorite` | 1:N | `InterviewFavorite.questionId` | 当前表结构要求收藏具体问题 |
-| `Interview` | `InterviewShare` | 1:N | `InterviewShare.interviewId` | 同一面试可生成多个分享令牌 |
-| `User` | `InterviewShare` | 1:N | `InterviewShare.userId` | 分享记录属于创建者 |
-| `InterviewShare` | `InterviewComment` | 1:N | `InterviewComment.shareId` | 评论挂接到公开分享记录 |
+| `Interview` | `InterviewExperience` | 1:0..1 | `InterviewExperience.interviewId` | 每场已完成面试最多发布一篇面经 |
+| `User` | `InterviewExperience` | 1:N | `InterviewExperience.userId` | 面经属于发布者 |
+| `InterviewExperience` | `InterviewComment` | 1:N | `InterviewComment.experienceId` | 评论挂接到当前可见的公开面经 |
 | `User` | `InterviewComment` | 1:N | `InterviewComment.userId` | 评论作者可删除自己的评论 |
 | `AiConfig` | AI 服务 | 1:N（使用关系） | `configType`/默认配置查询 | 不与面试表建立外键，由工厂和服务动态选取 |
 
@@ -116,14 +122,16 @@
 | 控制类 | 核心操作 | 直接协作对象 | 设计职责 |
 | --- | --- | --- | --- |
 | `AuthServiceImpl` | 发送验证码、注册、登录、登出、资料和密码维护 | `UserMapper`、JWT、Redis、安全组件 | 管理认证用例及用户账户状态 |
-| `InterviewServiceImpl` | `upload`、`list`、`getDetail`、`delete`、`getStatus`、`retry` | `InterviewMapper`、`InterviewQuestionMapper`、`InterviewAsyncService`、文件/PDF 工具 | 面试主用例、所有权校验、上传持久化和异步任务触发 |
-| `InterviewAsyncServiceImpl` | `processInterview` | `Interview`、`InterviewQuestion`、转写、公司分级、评分、解析器 | 推进“转写→分级→评分→落库”的异步状态机 |
+| `InterviewServiceImpl` | 上传、列表/详情、删除/恢复、取消、重试、重评、改标题和角色校正 | `InterviewMapper`、`InterviewQuestionMapper`、`InterviewAsyncService`、简历及文件工具 | 面试主用例、所有权校验、输入验证、状态转换和异步任务触发 |
+| `InterviewAsyncServiceImpl` | 处理、恢复和重新分析面试 | `Interview`、`InterviewQuestion`、转写、评分、答案缓存 | 以任务令牌和租约推进“转写→问答识别→评分→总结”的异步状态机 |
+| `ResumeServiceImpl` / `ResumeAsyncServiceImpl` | 上传、去重、查询、隐藏、重试与异步解析 | `UserResumeMapper`、PDF 解析、文件系统 | 管理不可变简历版本及可恢复的解析任务 |
 | `ScoreResultParser` | 解析并保存模型评分结果 | `InterviewMapper`、`InterviewQuestionMapper` | 将非结构化/JSON 评分结果转换为领域实体状态 |
 | `NoteServiceImpl` | 获取/保存面试笔记和问题笔记 | `InterviewNoteMapper` | 根据笔记作用域执行查询与 upsert |
 | `FavoriteServiceImpl` | 添加、取消、分页查询收藏 | `InterviewFavoriteMapper` | 保证用户收藏唯一性与删除权限 |
-| `ShareServiceImpl` | 创建分享、列表、撤销、公开切换、访问详情 | `InterviewShareMapper`、`InterviewMapper`、`InterviewQuestionMapper` | 管理分享令牌、过期时间、公开状态与访问详情 |
-| `ExperienceServiceImpl` | 公开面经列表与详情 | 分享、面试、问题 Mapper | 只组装公开且未过期的数据，并过滤私密字段 |
-| `CommentServiceImpl` | 评论列表、发表、删除 | `InterviewCommentMapper`、`InterviewShareMapper`、`UserMapper` | 校验分享有效性、评论长度与作者权限 |
+| `ExperiencePublicationServiceImpl` | 发布、更新、撤回、公开列表与详情 | 面经、面试、问题 Mapper | 执行唯一发布及管理员锁定规则，并过滤回答、转写、音频、简历和笔记等私密字段 |
+| `CommentServiceImpl` | 评论列表、发表、删除 | `InterviewCommentMapper`、`InterviewExperienceMapper`、`UserMapper` | 只允许对可见面经评论，并校验作者权限 |
+| `QuestionStandardCacheServiceImpl` | 查询或保存标准答案缓存 | `QuestionStandardCacheMapper` | 按题目上下文、模型、配置和提示词版本隔离通用/个人缓存 |
+| `InterviewCleanupService` | 到期面试与无引用隐藏简历清理 | 面试、简历及关联资源 Mapper | 在独立事务边界内一致清理关联数据 |
 | `FileServiceImpl` | 读取普通文件和 ASR 文件 | `InterviewMapper`、文件系统 | 验证文件引用后向 HTTP 层提供文件资源 |
 | `AiConfigServiceImpl` | 配置 CRUD、默认配置查询与切换 | `AiConfigMapper` | 管理 ASR/LLM 配置及同类型默认项唯一性 |
 | `TranscriptionServiceImpl` | 普通/详细转写 | `AiClientFactory`、`AsrClient` | 选择 ASR 客户端并统一转写返回模型 |
@@ -142,9 +150,10 @@
 - `InterviewAsyncService` → `InterviewAsyncServiceImpl`
 - `NoteService` → `NoteServiceImpl`
 - `FavoriteService` → `FavoriteServiceImpl`
-- `ShareService` → `ShareServiceImpl`
-- `ExperienceService` → `ExperienceServiceImpl`
+- `ResumeAsyncService` → `ResumeAsyncServiceImpl`
+- `ExperienceService` → `ExperiencePublicationServiceImpl`
 - `CommentService` → `CommentServiceImpl`
+- `QuestionStandardCacheService` → `QuestionStandardCacheServiceImpl`
 - `FileService` → `FileServiceImpl`
 - `AiConfigService` → `AiConfigServiceImpl`
 - `TranscriptionService` → `TranscriptionServiceImpl`
@@ -167,9 +176,9 @@
 | `ProfileBoundary` | `views/profile/index.vue` | `auth.js` | `AuthController.getProfile/updateProfile/changePassword` |
 | `InterviewListBoundary` | `views/interview/index.vue` | `interview.js` | `InterviewController.list/delete/getStatus/retry` |
 | `InterviewUploadBoundary` | `views/interview/upload.vue` | `interview.js` | `InterviewController.upload` |
-| `InterviewDetailBoundary` | `views/interview/detail.vue` | `interview.js`、`favorite.js`、`share.js` | `InterviewController`、`NoteController`、`FavoriteController`、`ShareController` |
+| `InterviewDetailBoundary` | `views/interview/detail.vue` | `interview.js`、`favorite.js`、`experience.js` | `InterviewController`、`NoteController`、`FavoriteController`、`ExperiencePublicationController` |
 | `FavoriteListBoundary` | `views/favorites/index.vue` | `favorite.js` | `FavoriteController.list/remove` |
-| `ShareDetailBoundary` | `views/share/index.vue` | `share.js` | `ShareController.getShareDetail` |
+| `ExperienceDetailBoundary` | `views/experience/index.vue` | `experience.js` | `ExperienceController.getDetail` |
 | `ExperienceSquareBoundary` | `views/experience/index.vue` | `experience.js` | `ExperienceController.list` |
 | `ExperienceDetailBoundary` | `views/experience/detail.vue` | `experience.js` | `ExperienceController.getDetail`、`CommentController` |
 | `AdminUserBoundary` | `views/admin/users.vue` | `admin.js` | `AdminUserController` |
@@ -189,9 +198,9 @@
 | `InterviewController` | `/interviews/**` | `InterviewService` | Multipart 上传、筛选参数、面试详情与状态 |
 | `NoteController` | `/interviews/{id}/.../note` | `NoteService` | 笔记请求与文本结果 |
 | `FavoriteController` | `/favorites/**` | `FavoriteService` | 收藏请求与分页收藏结果 |
-| `ShareController` | `/interviews/{id}/share`、`/shares/**`、`/share/{token}` | `ShareService` | 分享策略、Token、分享详情 |
+| `ExperiencePublicationController` | `/interviews/{id}/publication` | `ExperienceService` | 发布、更新、撤回本人面经 |
 | `ExperienceController` | `/experiences/**` | `ExperienceService` | 公开面经筛选与详情 |
-| `CommentController` | `/experiences/{token}/comments`、`/comments/{id}` | `CommentService` | 评论内容与分页结果 |
+| `CommentController` | `/experiences/{id}/comments`、`/comments/{id}` | `CommentService` | 评论内容与分页结果 |
 | `FileController` | `/files/**`、`/asr-files/**` | `FileService` | 文件名与文件资源 |
 | `AiConfigController` | `/ai-configs/**` | `AiConfigService` | AI 配置 DTO；密钥输出应脱敏 |
 | `AdminUserController` | `/admin/users/**` | `AdminService` | 用户列表、状态、角色 |
@@ -206,7 +215,7 @@ Controller 的职责限定为参数绑定、Bean Validation、获取当前用户
 
 | 边界接口 | 适配实现 | 外部系统 |
 | --- | --- | --- |
-| `AsrClient` / `WholeFileAsrClient` | `SpringAiFunAsrClient`、`SpringAiWhisperAsrClient` | Spring AI FunASR 自定义模型、Spring AI OpenAI 转写模型 |
+| `AsrClient` / `WholeFileAsrClient` | `SpringAiFunAsrClient` | Spring AI FunASR 自定义转写模型 |
 | `LlmClient` | `SpringAiDeepSeekLlmClient`、`SpringAiOpenAiCompatibleLlmClient` | Spring AI DeepSeek 与 OpenAI 兼容文本模型 |
 | `TranscriptionModel` | `FunAsrTranscriptionModel` | DashScope FunASR 异步任务协议、时间戳和说话人元数据 |
 | 文件边界 | `FileServiceImpl`、`FileUtil`、`PdfParser` | 本地上传目录、简历 PDF |
@@ -216,7 +225,7 @@ Controller 的职责限定为参数绑定、Bean Validation、获取当前用户
 
 ### 6.4 DTO 的边界定位
 
-`LoginRequest`、`RegisterRequest`、`InterviewUploadRequest`、`ShareRequest`、`NoteRequest`、`FavoriteRequest`、`CommentRequest` 等是输入边界 DTO；`LoginResponse`、`InterviewDetailResponse`、`InterviewListResponse`、`InterviewStatusResponse`、`ExperienceDetailResponse` 等是输出边界 DTO。DTO 不应继承 `BaseEntity`，也不应直接承担持久化职责。
+`LoginRequest`、`RegisterRequest`、`InterviewUploadRequest`、`ExperiencePublicationRequest`、`NoteRequest`、`FavoriteRequest`、`CommentRequest` 等是输入边界 DTO；`LoginResponse`、`InterviewDetailResponse`、`InterviewListResponse`、`InterviewStatusResponse`、`ExperienceDetailResponse` 等是输出边界 DTO。DTO 不应继承 `BaseEntity`，也不应直接承担持久化职责。
 
 ## 7. 各类之间的总体关系
 
@@ -232,13 +241,13 @@ Controller 的职责限定为参数绑定、Bean Validation、获取当前用户
 
 *图 8-1　面试上传与 AI 复盘时序图。实线表示同步调用，虚线开放箭头表示异步调用或返回消息。*
 
-异常时，`InterviewAsyncServiceImpl` 将 `Interview.status` 设为 `FAILED` 并记录 `errorMessage`；列表页通过 `GET /interviews/{id}/status` 轮询状态，用户可调用 retry 重新触发全流程。
+异常时，`InterviewAsyncServiceImpl` 将 `Interview.status` 设为 `FAILED` 并记录稳定错误码与错误信息；列表页通过 `GET /interviews/{id}/status` 轮询状态。`retry` 仅接受失败或取消状态，并从已有完整阶段继续；已完成面试使用 `reanalyze`，不重复调用 ASR。
 
-### 8.2 分享、面经与评论
+### 8.2 面经发布与评论
 
-![分享、面经与评论 UML 时序图](images/class-design/04-share-experience-comment-sequence.png)
+![面经发布与评论 UML 时序图](images/class-design/04-share-experience-comment-sequence.png)
 
-*图 8-2　分享、面经与评论时序图。私有分享管理和公开面经访问分别经过不同的控制链。*
+*图 8-2　面经发布与评论时序图。发布者状态与管理员治理状态共同决定面经及评论是否可见。图中的旧分享命名仅为图源文件名，运行模型以数字 ID 面经为准。*
 
 本章全部 UML 图片的可编辑源文件为：[AI面试复盘系统-UML图.drawio](images/class-design/AI面试复盘系统-UML图.drawio)。
 
@@ -248,22 +257,25 @@ Controller 的职责限定为参数绑定、Bean Validation、获取当前用户
 
 | 方法 | 前置条件 | 后置条件/异常 |
 | --- | --- | --- |
-| `upload(...)` | 已认证；音频、JD 满足校验要求 | 创建 `Interview`，保存文件信息，触发异步流程并返回 ID |
+| `upload(...)` | 已认证；MP3/WAV 不超过 2GB/2小时；JD、岗位、类型和有效 `resumeId` 齐全 | 创建 `Interview`，保存简历正文快照与音频信息，触发异步流程并返回 ID |
 | `list(userId, ...)` | 已认证 | 只返回该用户记录，支持筛选、分页和排序 |
 | `getDetail(id, userId)` | 记录存在且属于用户 | 返回面试及按序排列的问题；否则拒绝访问 |
-| `delete(id, userId)` | 记录存在且属于用户 | 执行逻辑删除；关联数据策略必须保持一致 |
+| `delete(id, userId)` | 记录存在且属于用户 | 进入 7 天回收站、使任务令牌失效并撤回面经 |
 | `getStatus(id, userId)` | 记录存在且属于用户 | 根据状态和步骤返回进度 |
-| `retry(id, userId)` | 记录存在且属于用户 | 清空错误、重置步骤并重新异步处理 |
+| `retry(id, userId)` | 状态为 `FAILED` 或 `CANCELLED` | 从已有完整阶段继续异步处理 |
+| `cancel(id, userId)` | 状态为处理中 | 置为 `CANCELLED`，保留已完成阶段并使旧任务令牌失效 |
+| `reanalyze(id, userId)` | 状态为已完成 | 撤回面经，不调用 ASR，成功后原子替换当前问题和评分 |
+| `restore(id, userId)` | 在 7 天恢复期内且属于用户 | 原样恢复面试及关联数据，不重新调用 AI |
 
-### 9.2 ShareService
+### 9.2 ExperienceService
 
 | 方法 | 规则 |
 | --- | --- |
-| `createShare` | 仅面试所有者可创建；生成不可预测且唯一的 Token；支持 7 天、30 天或永久 |
-| `listShares` | 仅所有者查看某面试的分享记录 |
-| `deleteShare` | 仅分享创建者撤销 |
-| `togglePublic` | 仅创建者切换是否进入面经广场 |
-| `getShareDetail` | 无需登录，但必须校验 Token、逻辑删除和过期时间，并过滤音频、简历、笔记等私密数据 |
+| `publish` | 仅所有者可发布已完成面试；一场面试最多一篇，管理员锁定时拒绝用户重新发布 |
+| `getPublication` | 仅所有者读取自己面试对应的发布记录 |
+| `updatePublication` | 仅发布者更新不超过 10,000 字的 Markdown 总结 |
+| `withdraw` | 发布者主动撤回；评论随面经隐藏但保留 |
+| `list/getDetail` | 仅返回 `PUBLISHED + NORMAL` 面经，并过滤用户回答、转写、音频、简历和私人笔记 |
 
 ### 9.3 AiClientFactory
 
@@ -300,8 +312,8 @@ Database Entity        External Client Boundary
 | `InterviewAsyncServiceImpl` | 每一步先更新进度；异常统一落为失败；成功时问题和总评一致 |
 | `NoteServiceImpl` | 面试笔记和问题笔记唯一作用域正确，不能跨用户读写 |
 | `FavoriteServiceImpl` | 同一用户对同一问题唯一；取消收藏只能由本人完成 |
-| `ShareServiceImpl` | Token 唯一、过期判断正确、私密字段不进入公开 DTO |
-| `CommentServiceImpl` | 评论只关联有效分享；删除只允许作者或明确授权的管理员 |
+| `ExperiencePublicationServiceImpl` | 每场面试唯一发布、管理员锁定、撤回/重发以及公开 DTO 隐私字段正确 |
+| `CommentServiceImpl` | 评论只关联当前可见面经；删除只允许作者或明确授权的管理员 |
 | `AiConfigServiceImpl` | 密钥脱敏；默认配置唯一；禁用配置不被工厂选中 |
 | `AdminServiceImpl` | 管理员接口由后端强制鉴权，不能只依赖前端隐藏菜单 |
 
@@ -314,8 +326,8 @@ Database Entity        External Client Boundary
 | 查看面试详情 | `InterviewDetailBoundary`、`InterviewController` | `InterviewServiceImpl` | `Interview`、`InterviewQuestion` |
 | 写面试/问题笔记 | `InterviewDetailBoundary`、`NoteController` | `NoteServiceImpl` | `InterviewNote`、`Interview`、`InterviewQuestion` |
 | 收藏问题 | `InterviewDetailBoundary`/`FavoriteListBoundary`、`FavoriteController` | `FavoriteServiceImpl` | `InterviewFavorite`、`InterviewQuestion` |
-| 创建分享 | `InterviewDetailBoundary`、`ShareController` | `ShareServiceImpl` | `InterviewShare`、`Interview` |
-| 浏览面经 | `ExperienceSquareBoundary`/`ExperienceDetailBoundary`、`ExperienceController` | `ExperienceServiceImpl` | `InterviewShare`、`Interview`、`InterviewQuestion` |
-| 评论面经 | `ExperienceDetailBoundary`、`CommentController` | `CommentServiceImpl` | `InterviewComment`、`InterviewShare`、`User` |
+| 发布/撤回面经 | `InterviewDetailBoundary`、`ExperiencePublicationController` | `ExperiencePublicationServiceImpl` | `InterviewExperience`、`Interview` |
+| 浏览面经 | `ExperienceSquareBoundary`/`ExperienceDetailBoundary`、`ExperienceController` | `ExperiencePublicationServiceImpl` | `InterviewExperience`、`Interview`、`InterviewQuestion` |
+| 评论面经 | `ExperienceDetailBoundary`、`CommentController` | `CommentServiceImpl` | `InterviewComment`、`InterviewExperience`、`User` |
 | 管理 AI 配置 | `AdminAiConfigBoundary`、`AiConfigController` | `AiConfigServiceImpl`、`AiClientFactory` | `AiConfig` |
-| 后台管理与统计 | 管理端各 Boundary、Admin Controller | `AdminServiceImpl` | `User`、`Interview`、`InterviewShare`、`InterviewComment` |
+| 后台管理与统计 | 管理端各 Boundary、Admin Controller | `AdminServiceImpl` | `User`、`Interview`、`InterviewExperience`、`InterviewComment` |

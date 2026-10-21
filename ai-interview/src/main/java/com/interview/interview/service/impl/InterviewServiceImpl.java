@@ -25,6 +25,7 @@ import com.interview.interview.mapper.InterviewQuestionMapper;
 import com.interview.interview.service.InterviewAsyncService;
 import com.interview.interview.service.InterviewService;
 import com.interview.interview.service.ResumeService;
+import com.interview.interview.service.ExperienceService;
 import com.interview.common.utils.FileUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -66,10 +69,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class InterviewServiceImpl implements InterviewService {
 
+    private static final Set<String> INTERVIEW_TYPES = Set.of(
+            "coding", "behavioral", "system_design", "comprehensive");
+    private static final Set<String> SORT_FIELDS = Set.of("createdAt", "overallScore");
+
     private final InterviewMapper interviewMapper;
     private final InterviewQuestionMapper questionMapper;
     private final InterviewAsyncService interviewAsyncService;
     private final ResumeService resumeService;
+    private final ExperienceService experienceService;
     private final AudioPreprocessor audioPreprocessor;
     private final AiClientFactory aiClientFactory;
     private final ObjectMapper objectMapper;
@@ -91,28 +99,25 @@ public class InterviewServiceImpl implements InterviewService {
      */
     @Override
     @Transactional
-    public Long upload(Long userId, MultipartFile audioFile, MultipartFile resumeFile,
-                       String jdText, String title, String companyName,
-                       String positionTitle, String industry, String interviewType) {
-        return upload(userId, audioFile, null, resumeFile, jdText, title,
-                companyName, positionTitle, industry, interviewType);
-    }
-
-    @Override
-    @Transactional
-    public Long upload(Long userId, MultipartFile audioFile, Long resumeId, MultipartFile resumeFile,
+    public Long upload(Long userId, MultipartFile audioFile, Long resumeId,
                        String jdText, String title, String companyName,
                        String positionTitle, String industry, String interviewType) {
         FileUtil.validateAudioFile(audioFile);
-
-        UserResume resume;
-        if (resumeId != null) {
-            resume = resumeService.requireReady(resumeId, userId);
-        } else if (resumeFile != null && !resumeFile.isEmpty()) {
-            resume = resumeService.upload(userId, resumeFile);
-        } else {
-            throw new BusinessException(ErrorCode.RESUME_REQUIRED.getCode(), ErrorCode.RESUME_REQUIRED.getMessage());
+        if (jdText == null || jdText.isBlank()) {
+            throw badRequest("岗位JD不能为空");
         }
+        if (positionTitle == null || positionTitle.isBlank()) {
+            throw badRequest("岗位名称不能为空");
+        }
+        if (interviewType == null || !INTERVIEW_TYPES.contains(interviewType.trim().toLowerCase())) {
+            throw badRequest("面试类型只能是coding、behavioral、system_design或comprehensive");
+        }
+        interviewType = interviewType.trim().toLowerCase();
+        positionTitle = positionTitle.trim();
+        companyName = trimToNull(companyName);
+        industry = trimToNull(industry);
+
+        UserResume resume = resumeService.requireReady(resumeId, userId);
 
         Interview active = interviewMapper.selectActiveForUpdate(userId);
         if (active != null) {
@@ -150,7 +155,7 @@ public class InterviewServiceImpl implements InterviewService {
 
         Interview interview = new Interview();
         interview.setUserId(userId);
-        interview.setTitle(title);
+        interview.setTitle(defaultTitle(title, companyName, positionTitle));
         interview.setCompanyName(companyName);
         interview.setPositionTitle(positionTitle);
         interview.setIndustry(industry);
@@ -230,7 +235,17 @@ public class InterviewServiceImpl implements InterviewService {
     public PageResult<InterviewListResponse> list(Long userId, int page, int size,
                                                    String companyName, String positionTitle,
                                                    String industry, String interviewType,
-                                                   String sortBy) {
+                                                   String keyword, Integer status, String sortBy) {
+        if (sortBy == null || sortBy.isBlank()) sortBy = "createdAt";
+        if (page < 1 || size < 1 || size > 100) {
+            throw badRequest("分页参数不合法，page至少为1且size范围为1-100");
+        }
+        if (!SORT_FIELDS.contains(sortBy)) {
+            throw badRequest("不支持的排序字段");
+        }
+        if (status != null && !Set.of(0, 1, 2, 3).contains(status)) {
+            throw badRequest("面试状态不合法");
+        }
         Page<Interview> pageParam = new Page<>(page, size);
         LambdaQueryWrapper<Interview> wrapper = new LambdaQueryWrapper<>();
 
@@ -247,6 +262,12 @@ public class InterviewServiceImpl implements InterviewService {
         }
         if (interviewType != null && !interviewType.isEmpty()) {
             wrapper.eq(Interview::getInterviewType, interviewType);
+        }
+        if (status != null) wrapper.eq(Interview::getStatus, status);
+        if (keyword != null && !keyword.isBlank()) {
+            wrapper.and(w -> w.like(Interview::getTitle, keyword.trim())
+                    .or().like(Interview::getCompanyName, keyword.trim())
+                    .or().like(Interview::getPositionTitle, keyword.trim()));
         }
 
         // 排序
@@ -291,8 +312,11 @@ public class InterviewServiceImpl implements InterviewService {
         questionWrapper.eq(InterviewQuestion::getInterviewId, id);
         questionWrapper.orderByAsc(InterviewQuestion::getQuestionIndex);
         List<InterviewQuestion> questions = questionMapper.selectList(questionWrapper);
-
-        return toInterviewDetailResponse(interview, questions);
+        List<InterviewQuestion> activeQuestions = questions.stream()
+                .filter(q -> q.getIsActive() == null || q.getIsActive() == 1).toList();
+        List<InterviewQuestion> archivedQuestions = questions.stream()
+                .filter(q -> Integer.valueOf(0).equals(q.getIsActive())).toList();
+        return toInterviewDetailResponse(interview, activeQuestions, archivedQuestions);
     }
 
     /**
@@ -318,6 +342,7 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(),
                     ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
         }
+        experienceService.withdrawForInterview(id);
         log.info("删除面试记录: id={}, userId={}", id, userId);
     }
 
@@ -359,6 +384,7 @@ public class InterviewServiceImpl implements InterviewService {
         // 已完成或失败
         if (status == 1) return 100; // COMPLETED
         if (status == 2) return 100; // FAILED
+        if (status == 3) return 100; // CANCELLED
 
         // 处理中，根据步骤计算
         return switch (step) {
@@ -418,11 +444,9 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(),
                     "当前已有其他面试正在处理中");
         }
-        if (interview.getStatus() == InterviewStatus.PROCESSING.getCode()
-                && interview.getLeaseExpiresAt() != null
-                && interview.getLeaseExpiresAt().isAfter(LocalDateTime.now())) {
-            throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(),
-                    ErrorCode.INTERVIEW_PROCESSING.getMessage());
+        if (!Set.of(InterviewStatus.FAILED.getCode(), InterviewStatus.CANCELLED.getCode())
+                .contains(interview.getStatus())) {
+            throw badRequest("只有失败或已取消的面试可以重试");
         }
 
         // 记录原状态用于日志
@@ -448,6 +472,44 @@ public class InterviewServiceImpl implements InterviewService {
         submitAfterCommit(id, token);
 
         log.info("重新处理面试: id={}, 之前状态={}", id, previousStatus);
+    }
+
+    @Override
+    @Transactional
+    public void cancel(Long id, Long userId) {
+        Interview interview = ownedInterview(id, userId);
+        if (!Integer.valueOf(InterviewStatus.PROCESSING.getCode()).equals(interview.getStatus())) {
+            throw badRequest("只有处理中的面试可以取消");
+        }
+        interview.setStatus(InterviewStatus.CANCELLED.getCode());
+        interview.setProcessingToken(null);
+        interview.setLeaseExpiresAt(null);
+        interview.setHeartbeatAt(LocalDateTime.now());
+        interview.setLastErrorCode("CANCELLED_BY_USER");
+        interview.setErrorMessage("用户已取消处理");
+        interviewMapper.updateById(interview);
+    }
+
+    @Override
+    @Transactional
+    public void reanalyze(Long id, Long userId) {
+        Interview interview = ownedInterview(id, userId);
+        if (!Integer.valueOf(InterviewStatus.COMPLETED.getCode()).equals(interview.getStatus())) {
+            throw badRequest("只有已完成面试可以重新分析");
+        }
+        experienceService.withdrawForInterview(id);
+        startReanalysis(interview);
+    }
+
+    @Override
+    @Transactional
+    public void updateTitle(Long id, Long userId, String title) {
+        Interview interview = ownedInterview(id, userId);
+        if (title == null || title.isBlank() || title.trim().length() > 200) {
+            throw badRequest("标题不能为空且不能超过200个字符");
+        }
+        interview.setTitle(title.trim());
+        interviewMapper.updateById(interview);
     }
 
     @Override
@@ -541,6 +603,7 @@ public class InterviewServiceImpl implements InterviewService {
             interview.setReanalysisStatus("PROCESSING");
             interview.setReanalysisError(null);
             interview.setLlmConfigSnapshot(aiClientFactory.snapshotDefault(ConfigType.LLM));
+            experienceService.withdrawForInterview(id);
             interviewMapper.updateById(interview);
             submitReanalysisAfterCommit(id, token);
         } catch (BusinessException e) {
@@ -606,31 +669,13 @@ public class InterviewServiceImpl implements InterviewService {
      * @return 面试详情响应
      */
     private InterviewDetailResponse toInterviewDetailResponse(Interview interview,
-                                                              List<InterviewQuestion> questions) {
+                                                              List<InterviewQuestion> questions,
+                                                              List<InterviewQuestion> archivedQuestions) {
         List<InterviewDetailResponse.QuestionResponse> questionResponses = questions.stream()
-                .map(q -> InterviewDetailResponse.QuestionResponse.builder()
-                        .id(q.getId())
-                        .questionIndex(q.getQuestionIndex())
-                        .questionText(q.getQuestionText())
-                        .questionType(q.getQuestionType())
-                        .recognitionConfidence(q.getRecognitionConfidence())
-                        .includedInScore(Integer.valueOf(1).equals(q.getIncludedInScore()))
-                        .questionSpeaker(q.getQuestionSpeaker())
-                        .answerText(q.getAnswerText())
-                        .answerSpeaker(q.getAnswerSpeaker())
-                        .startTime(q.getStartTime())
-                        .endTime(q.getEndTime())
-                        .score(q.getScore())
-                        .dimensionContent(q.getDimensionContent())
-                        .dimensionLogic(q.getDimensionLogic())
-                        .dimensionExpression(q.getDimensionExpression())
-                        .dimensionProfessional(q.getDimensionProfessional())
-                        .improvementTip(q.getImprovementTip())
-                        .referenceAnswer(q.getReferenceAnswer())
-                        .answerDifference(q.getAnswerDifference())
-                        .rubricDetail(parseRubricDetail(q.getRubricDetail()))
-                        .build())
+                .map(this::toQuestionResponse)
                 .collect(Collectors.toList());
+        List<InterviewDetailResponse.QuestionResponse> archivedResponses = archivedQuestions.stream()
+                .map(this::toQuestionResponse).collect(Collectors.toList());
 
         return InterviewDetailResponse.builder()
                 .id(interview.getId())
@@ -660,12 +705,80 @@ public class InterviewServiceImpl implements InterviewService {
                 .strengths(interview.getStrengths())
                 .weaknesses(interview.getWeaknesses())
                 .questions(questionResponses)
+                .archivedQuestions(archivedResponses)
                 .createdAt(interview.getCreatedAt())
+                .build();
+    }
+
+    private InterviewDetailResponse.QuestionResponse toQuestionResponse(InterviewQuestion q) {
+        return InterviewDetailResponse.QuestionResponse.builder()
+                        .id(q.getId())
+                        .questionIndex(q.getQuestionIndex())
+                        .questionText(q.getQuestionText())
+                        .questionType(q.getQuestionType())
+                        .recognitionConfidence(q.getRecognitionConfidence())
+                        .includedInScore(Integer.valueOf(1).equals(q.getIncludedInScore()))
+                        .questionSpeaker(q.getQuestionSpeaker())
+                        .answerText(q.getAnswerText())
+                        .answerSpeaker(q.getAnswerSpeaker())
+                        .startTime(q.getStartTime())
+                        .endTime(q.getEndTime())
+                        .score(q.getScore())
+                        .dimensionContent(q.getDimensionContent())
+                        .dimensionLogic(q.getDimensionLogic())
+                        .dimensionExpression(q.getDimensionExpression())
+                        .dimensionProfessional(q.getDimensionProfessional())
+                        .improvementTip(q.getImprovementTip())
+                        .referenceAnswer(q.getReferenceAnswer())
+                        .answerDifference(q.getAnswerDifference())
+                        .rubricDetail(parseRubricDetail(q.getRubricDetail()))
                 .build();
     }
 
     private JsonNode parseRubricDetail(String value) {
         return parseJson(value, "评分量表");
+    }
+
+    private Interview ownedInterview(Long id, Long userId) {
+        Interview interview = interviewMapper.selectById(id);
+        if (interview == null) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(), ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
+        }
+        if (!userId.equals(interview.getUserId())) {
+            throw new BusinessException(ErrorCode.INTERVIEW_ACCESS_DENIED.getCode(), ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
+        }
+        return interview;
+    }
+
+    private void startReanalysis(Interview interview) {
+        Interview active = interviewMapper.selectActiveForUpdate(interview.getUserId());
+        if (active != null) throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(), "当前已有其他面试正在处理中");
+        String token = UUID.randomUUID().toString();
+        interview.setStatus(InterviewStatus.PROCESSING.getCode());
+        interview.setProcessingStep(1);
+        interview.setProcessingToken(token);
+        interview.setHeartbeatAt(LocalDateTime.now());
+        interview.setLeaseExpiresAt(LocalDateTime.now().plusMinutes(5));
+        interview.setReanalysisStatus("PROCESSING");
+        interview.setReanalysisError(null);
+        interview.setLlmConfigSnapshot(aiClientFactory.snapshotDefault(ConfigType.LLM));
+        interviewMapper.updateById(interview);
+        submitReanalysisAfterCommit(interview.getId(), token);
+    }
+
+    private BusinessException badRequest(String message) {
+        return new BusinessException(ErrorCode.BAD_REQUEST.getCode(), message);
+    }
+
+    private String trimToNull(String value) {
+        if (value == null || value.isBlank()) return null;
+        return value.trim();
+    }
+
+    private String defaultTitle(String title, String company, String position) {
+        if (title != null && !title.isBlank()) return title.trim();
+        String date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
+        return company == null ? position + "-" + date : company + "-" + position + "-" + date;
     }
 
     private JsonNode parseJson(String value, String description) {

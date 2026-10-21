@@ -12,7 +12,7 @@ public final class PermissionCodes {
     public static final String INTERVIEW_MANAGE = "interview:manage";
     public static final String NOTE_MANAGE = "note:manage";
     public static final String FAVORITE_MANAGE = "favorite:manage";
-    public static final String SHARE_MANAGE = "share:manage";
+    public static final String EXPERIENCE_PUBLISH = "experience:publish";
     public static final String COMMENT_MANAGE_OWN = "comment:manage_own";
 
     public static final String USER_READ = "user:read";

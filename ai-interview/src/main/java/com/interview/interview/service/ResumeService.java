@@ -9,6 +9,8 @@ import java.util.List;
 public interface ResumeService {
     UserResume upload(Long userId, MultipartFile file);
     List<UserResume> list(Long userId);
+    UserResume get(Long resumeId, Long userId);
     UserResume requireReady(Long resumeId, Long userId);
+    void retry(Long resumeId, Long userId);
     void delete(Long resumeId, Long userId);
 }

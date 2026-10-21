@@ -137,6 +137,12 @@ public class AiClientFactory {
         return buildLlm(fromSnapshot(snapshot, ConfigType.LLM));
     }
 
+    /** 返回不含密钥的快照元数据，供缓存和审计隔离使用。 */
+    public SnapshotMetadata snapshotMetadata(String snapshot, ConfigType type) {
+        RuntimeConfig runtime = fromSnapshot(snapshot, type);
+        return new SnapshotMetadata(runtime.id(), runtime.provider(), runtime.modelName(), runtime.version());
+    }
+
     private AiConfig defaultConfig(ConfigType configType) {
         LambdaQueryWrapper<AiConfig> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AiConfig::getConfigType, configType.getCode());
@@ -248,4 +254,6 @@ public class AiClientFactory {
             return properties;
         }
     }
+
+    public record SnapshotMetadata(Long configId, String provider, String modelName, String version) {}
 }

@@ -17,7 +17,9 @@ import java.time.LocalDateTime;
 public class ExperienceListResponse {
 
     /** 分享 Token */
-    private String token;
+    private Long id;
+    private String authorNickname;
+    private String authorAvatar;
 
     /** 面试标题 */
     private String title;
@@ -44,5 +46,5 @@ public class ExperienceListResponse {
     private Integer viewCount;
 
     /** 发布时间 */
-    private LocalDateTime createdAt;
+    private LocalDateTime publishedAt;
 }

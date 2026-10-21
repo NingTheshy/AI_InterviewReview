@@ -5,6 +5,8 @@ import com.interview.common.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("interview_question")
@@ -30,4 +32,7 @@ public class InterviewQuestion extends BaseEntity {
     private String referenceAnswer;
     private String answerDifference;
     private String rubricDetail;
+    private String questionFingerprint;
+    private Integer isActive;
+    private LocalDateTime archivedAt;
 }

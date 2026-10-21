@@ -1,11 +1,12 @@
 package com.interview.interview.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import com.interview.interview.entity.InterviewFavorite;
 import com.interview.interview.mapper.InterviewFavoriteMapper;
+import com.interview.interview.mapper.InterviewMapper;
+import com.interview.interview.mapper.InterviewQuestionMapper;
 import com.interview.interview.service.InterviewResourceAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,6 +35,12 @@ class FavoriteServiceImplTest {
 
     @Mock
     private InterviewResourceAccessService resourceAccessService;
+
+    @Mock
+    private InterviewQuestionMapper questionMapper;
+
+    @Mock
+    private InterviewMapper interviewMapper;
 
     @InjectMocks
     private FavoriteServiceImpl favoriteService;
@@ -86,13 +93,11 @@ class FavoriteServiceImplTest {
         @Test
         @DisplayName("添加收藏 - 无问题 ID（收藏整个面试）")
         void addFavorite_WithoutQuestionId() {
-            when(favoriteMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
-            when(favoriteMapper.insert(any(InterviewFavorite.class))).thenReturn(1);
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> favoriteService.addFavorite(TEST_USER_ID, TEST_INTERVIEW_ID, null, null));
 
-            favoriteService.addFavorite(TEST_USER_ID, TEST_INTERVIEW_ID, null, null);
-
-            verify(resourceAccessService).requireVisibleInterview(TEST_INTERVIEW_ID, TEST_USER_ID);
-            verify(favoriteMapper).insert(any(InterviewFavorite.class));
+            assertEquals(ErrorCode.BAD_REQUEST.getCode(), ex.getCode());
+            verifyNoInteractions(resourceAccessService, favoriteMapper);
         }
     }
 
@@ -141,11 +146,10 @@ class FavoriteServiceImplTest {
         @Test
         @DisplayName("查询收藏列表成功")
         void list_Success() {
-            Page<InterviewFavorite> page = new Page<>(1, 10);
-            page.setRecords(Collections.singletonList(testFavorite));
-            page.setTotal(1);
-
-            when(favoriteMapper.selectPage(any(), any(LambdaQueryWrapper.class))).thenReturn(page);
+            when(favoriteMapper.selectList(any(LambdaQueryWrapper.class)))
+                    .thenReturn(Collections.singletonList(testFavorite));
+            when(questionMapper.selectBatchIds(anyCollection())).thenReturn(Collections.emptyList());
+            when(interviewMapper.selectBatchIds(anyCollection())).thenReturn(Collections.emptyList());
 
             var result = favoriteService.list(TEST_USER_ID, 1, 10);
 
@@ -156,11 +160,7 @@ class FavoriteServiceImplTest {
         @Test
         @DisplayName("查询收藏列表 - 空列表")
         void list_Empty() {
-            Page<InterviewFavorite> page = new Page<>(1, 10);
-            page.setRecords(Collections.emptyList());
-            page.setTotal(0);
-
-            when(favoriteMapper.selectPage(any(), any(LambdaQueryWrapper.class))).thenReturn(page);
+            when(favoriteMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(Collections.emptyList());
 
             var result = favoriteService.list(TEST_USER_ID, 1, 10);
 
@@ -177,14 +177,14 @@ class FavoriteServiceImplTest {
     class BoundaryTest {
 
         @Test
-        @DisplayName("添加收藏 - 达到上限")
-        void addFavorite_LimitReached() {
-            when(favoriteMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(100L);
+        @DisplayName("添加收藏 - 不再限制收藏总数")
+        void addFavorite_NoGlobalLimit() {
+            when(favoriteMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+            when(favoriteMapper.insert(any(InterviewFavorite.class))).thenReturn(1);
 
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> favoriteService.addFavorite(TEST_USER_ID, TEST_INTERVIEW_ID, TEST_QUESTION_ID, null));
+            favoriteService.addFavorite(TEST_USER_ID, TEST_INTERVIEW_ID, TEST_QUESTION_ID, null);
 
-            assertEquals(ErrorCode.FAVORITE_LIMIT.getCode(), ex.getCode());
+            verify(favoriteMapper).insert(any(InterviewFavorite.class));
         }
 
         @Test

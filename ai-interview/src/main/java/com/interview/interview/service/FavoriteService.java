@@ -14,12 +14,12 @@ public interface FavoriteService {
     /**
      * 添加收藏
      * <p>
-     * 同一用户不能重复收藏同一问题。收藏可关联整个面试或具体问题。
+     * 同一用户不能重复收藏同一问题。
      * </p>
      *
      * @param userId      用户 ID
      * @param interviewId 面试 ID
-     * @param questionId  问题 ID（可选，为 null 时收藏整个面试）
+     * @param questionId  问题 ID（必填）
      * @param remark      备注
      * @throws com.interview.common.exception.BusinessException 已收藏时抛出
      */
@@ -42,5 +42,10 @@ public interface FavoriteService {
      * @param size   每页大小
      * @return 收藏列表（分页）
      */
-    PageResult<FavoriteResponse> list(Long userId, int page, int size);
+    PageResult<FavoriteResponse> list(Long userId, int page, int size, Long interviewId,
+                                      Integer minScore, Integer maxScore, String sortBy);
+
+    default PageResult<FavoriteResponse> list(Long userId, int page, int size) {
+        return list(userId, page, size, null, null, null, "createdAt");
+    }
 }

@@ -1,30 +1,34 @@
 package com.interview.interview.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
 import com.interview.interview.dto.FavoriteResponse;
 import com.interview.interview.entity.InterviewFavorite;
+import com.interview.interview.entity.InterviewQuestion;
+import com.interview.interview.entity.Interview;
 import com.interview.interview.mapper.InterviewFavoriteMapper;
+import com.interview.interview.mapper.InterviewQuestionMapper;
+import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.service.FavoriteService;
 import com.interview.interview.service.InterviewResourceAccessService;
 import lombok.RequiredArgsConstructor;
 
 import java.util.List;
+import java.util.Comparator;
 import java.util.stream.Collectors;
+import java.util.Map;
+import java.util.Set;
+import java.util.Collections;
+import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * 收藏服务实现类
  * <p>
- * 提供面试问题的收藏管理功能。收藏支持两种粒度：
- * <ul>
- *   <li>整个面试（questionId 为 null）</li>
- *   <li>具体问题（questionId 不为 null）</li>
- * </ul>
+ * 提供面试问题的收藏管理功能。
  * 同一用户不能重复收藏同一面试/问题。
  * </p>
  */
@@ -35,11 +39,8 @@ public class FavoriteServiceImpl implements FavoriteService {
 
     private final InterviewFavoriteMapper favoriteMapper;
     private final InterviewResourceAccessService resourceAccessService;
-
-    /**
-     * 每个用户的收藏上限
-     */
-    private static final int FAVORITE_LIMIT = 100;
+    private final InterviewQuestionMapper questionMapper;
+    private final InterviewMapper interviewMapper;
 
     /**
      * {@inheritDoc}
@@ -52,29 +53,14 @@ public class FavoriteServiceImpl implements FavoriteService {
      */
     @Override
     public void addFavorite(Long userId, Long interviewId, Long questionId, String remark) {
-        if (questionId == null) {
-            resourceAccessService.requireVisibleInterview(interviewId, userId);
-        } else {
-            resourceAccessService.requireVisibleQuestion(interviewId, questionId, userId);
-        }
-
-        // 检查收藏上限
-        LambdaQueryWrapper<InterviewFavorite> countWrapper = new LambdaQueryWrapper<>();
-        countWrapper.eq(InterviewFavorite::getUserId, userId);
-        if (favoriteMapper.selectCount(countWrapper) >= FAVORITE_LIMIT) {
-            throw new BusinessException(ErrorCode.FAVORITE_LIMIT.getCode(),
-                    ErrorCode.FAVORITE_LIMIT.getMessage());
-        }
+        if (questionId == null) throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "收藏仅支持具体问题");
+        resourceAccessService.requireVisibleQuestion(interviewId, questionId, userId);
 
         // 检查是否已收藏
         LambdaQueryWrapper<InterviewFavorite> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InterviewFavorite::getUserId, userId);
         wrapper.eq(InterviewFavorite::getInterviewId, interviewId);
-        if (questionId != null) {
-            wrapper.eq(InterviewFavorite::getQuestionId, questionId);
-        } else {
-            wrapper.isNull(InterviewFavorite::getQuestionId);
-        }
+        wrapper.eq(InterviewFavorite::getQuestionId, questionId);
 
         if (favoriteMapper.selectCount(wrapper) > 0) {
             throw new BusinessException(ErrorCode.FAVORITE_EXISTS.getCode(),
@@ -120,22 +106,47 @@ public class FavoriteServiceImpl implements FavoriteService {
      * </p>
      */
     @Override
-    public PageResult<FavoriteResponse> list(Long userId, int page, int size) {
-        Page<InterviewFavorite> pageParam = new Page<>(page, size);
+    public PageResult<FavoriteResponse> list(Long userId, int page, int size, Long interviewId,
+                                              Integer minScore, Integer maxScore, String sortBy) {
+        if (sortBy == null || sortBy.isBlank()) sortBy = "createdAt";
+        if (page < 1 || size < 1 || size > 100 || !Set.of("createdAt", "score").contains(sortBy)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "分页或排序参数不合法");
+        }
         LambdaQueryWrapper<InterviewFavorite> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InterviewFavorite::getUserId, userId);
+        if (interviewId != null) wrapper.eq(InterviewFavorite::getInterviewId, interviewId);
         wrapper.orderByDesc(InterviewFavorite::getCreatedAt);
 
-        Page<InterviewFavorite> result = favoriteMapper.selectPage(pageParam, wrapper);
-        List<FavoriteResponse> records = result.getRecords().stream()
-                .map(f -> FavoriteResponse.builder()
-                        .id(f.getId())
-                        .interviewId(f.getInterviewId())
-                        .questionId(f.getQuestionId())
-                        .remark(f.getRemark())
-                        .createdAt(f.getCreatedAt())
-                        .build())
+        // 分数筛选和分数排序依赖问题表，必须先完成关联与筛选再分页，
+        // 否则会出现当前页数量不足且 total 仍为筛选前数量的问题。
+        List<InterviewFavorite> favorites = favoriteMapper.selectList(wrapper);
+        List<Long> questionIds = favorites.stream().map(InterviewFavorite::getQuestionId).toList();
+        Map<Long, InterviewQuestion> questionMap = questionIds.isEmpty() ? Collections.emptyMap()
+                : questionMapper.selectBatchIds(questionIds).stream().collect(Collectors.toMap(InterviewQuestion::getId, Function.identity()));
+        List<Long> interviewIds = favorites.stream().map(InterviewFavorite::getInterviewId).distinct().toList();
+        Map<Long, Interview> interviewMap = interviewIds.isEmpty() ? Collections.emptyMap()
+                : interviewMapper.selectBatchIds(interviewIds).stream().collect(Collectors.toMap(Interview::getId, Function.identity()));
+        Comparator<FavoriteResponse> comparator = "score".equals(sortBy)
+                ? Comparator.comparing(FavoriteResponse::getScore, Comparator.nullsLast(Comparator.reverseOrder()))
+                : Comparator.comparing(FavoriteResponse::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder()));
+        List<FavoriteResponse> filtered = favorites.stream()
+                .map(f -> toResponse(f, questionMap.get(f.getQuestionId()), interviewMap.get(f.getInterviewId())))
+                .filter(r -> minScore == null || r.getScore() != null && r.getScore() >= minScore)
+                .filter(r -> maxScore == null || r.getScore() != null && r.getScore() <= maxScore)
+                .sorted(comparator)
                 .collect(Collectors.toList());
-        return new PageResult<>(records, result.getTotal(), page, size);
+        int from = Math.min((page - 1) * size, filtered.size());
+        int to = Math.min(from + size, filtered.size());
+        return new PageResult<>(filtered.subList(from, to), (long) filtered.size(), page, size);
+    }
+
+    private FavoriteResponse toResponse(InterviewFavorite favorite, InterviewQuestion question, Interview interview) {
+        return FavoriteResponse.builder().id(favorite.getId()).interviewId(favorite.getInterviewId())
+                .questionId(favorite.getQuestionId()).questionText(question == null ? null : question.getQuestionText())
+                .referenceAnswer(question == null ? null : question.getReferenceAnswer())
+                .score(question == null ? null : question.getScore())
+                .interviewTitle(interview == null ? null : interview.getTitle())
+                .archived(question != null && Integer.valueOf(0).equals(question.getIsActive()))
+                .remark(favorite.getRemark()).createdAt(favorite.getCreatedAt()).build();
     }
 }

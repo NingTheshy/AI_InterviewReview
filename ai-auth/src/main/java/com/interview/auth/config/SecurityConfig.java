@@ -69,8 +69,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/auth/login", "/auth/register", "/auth/send-code").permitAll();
                     auth.requestMatchers(HttpMethod.GET,
-                            "/experiences", "/experiences/{token}",
-                            "/experiences/{token}/comments", "/share/{token}").permitAll();
+                            "/experiences", "/experiences/{id}",
+                            "/experiences/{id}/comments").permitAll();
                     auth.requestMatchers(HttpMethod.GET, "/asr-files/**").permitAll();
                     auth.requestMatchers("/favicon.ico").permitAll();
                     if (Arrays.stream(environment.getActiveProfiles()).noneMatch("prod"::equalsIgnoreCase)) {

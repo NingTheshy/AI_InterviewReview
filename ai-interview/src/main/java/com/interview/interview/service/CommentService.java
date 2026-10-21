@@ -20,7 +20,7 @@ public interface CommentService {
      * @return 评论列表（分页，按创建时间倒序），包含评论者昵称和头像
      * @throws com.interview.common.exception.BusinessException 分享不存在
      */
-    PageResult<CommentResponse> listByShareToken(String token, int page, int size);
+    PageResult<CommentResponse> listByExperienceId(Long experienceId, int page, int size);
 
     /**
      * 发表评论
@@ -30,7 +30,7 @@ public interface CommentService {
      * @param content 评论内容（1-500 字符）
      * @throws com.interview.common.exception.BusinessException 分享不存在、内容为空或超长
      */
-    void addComment(String token, Long userId, String content);
+    void addComment(Long experienceId, Long userId, String content);
 
     /**
      * 删除评论（仅评论作者可删除）

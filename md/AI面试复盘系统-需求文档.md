@@ -1,8 +1,20 @@
 # AI 面试复盘系统 - 需求文档
 
-> 版本: v1.6 MVP
-> 日期: 2026-10-20
-> 状态: 已更新（统一量表评分、FunASR 时间戳、完整 RBAC、资源归属校验与 AI 密钥加密）
+> 版本: v1.7 面试业务闭环
+> 日期: 2026-10-21
+> 状态: 已同步异步简历、任务状态机、标准答案缓存、问题归档与公开面经
+
+> **当前实施基线：** 简历通过 `/resumes` 独立异步解析，创建面试必须绑定本人 `SUCCESS` 且正文非空的 `resumeId`；音频仅支持 MP3/WAV，最大 2GB、最长 2 小时。任务支持 `CANCELLED`、阶段重试和已完成面试独立重评。收藏仅面向问题。私密分享已移除，面经以数字 ID 发布，每场面试最多一篇，并受管理员下架锁定。本文旧章节若仍出现 `resumeFile`、200MB、分享 token 或 `share:manage`，均由本基线及下方“面试业务闭环”章节取代。
+
+### 0.1 面试业务闭环（权威规则）
+
+- `POST /resumes` 创建 `PROCESSING` 记录并异步解析；同一用户的相同 PDF 按 SHA-256 复用未隐藏记录，失败可重试。
+- `POST /interviews/upload` 必填音频、非空 JD、`resumeId`、岗位和合法面试类型；公司、行业、标题选填，标题按“公司-岗位-日期”或“岗位-日期”生成。
+- 每个用户最多一场 AI 处理中面试；取消保留阶段产物，`retry` 仅用于失败或取消，`reanalyze` 仅用于已完成面试且不再调用 ASR。
+- 长转写按 FunASR 句子及时间戳以有限重叠窗口分块，跨块结果按时间范围和文本指纹去重。
+- 技术/客观题标准答案不读取简历；个人/项目/行为题必须读取面试绑定简历，并按用户、面试、简历版本、模型和提示词版本隔离缓存。
+- 重评按问题指纹和时间范围保留匹配问题 ID；未匹配旧问题归档，从而保留问题笔记与收藏。
+- 面经只展示题目、分数、关键差距、改进建议、标准答案、昵称和头像，不展示回答、转写、音频、简历或私人笔记。
 
 ---
 
@@ -233,24 +245,24 @@ ai-web → ai-interview → ai-common
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| audioFile | File | 是 | 面试录音音频（MP3/WAV），最大 200MB |
+| audioFile | File | 是 | 面试录音音频（MP3/WAV），最大 2GB、最长 2 小时 |
 | jdText | String | 是 | 岗位 JD 文本（直接粘贴） |
-| resumeFile | File | 是 | 个人简历（PDF 格式），最大 20MB |
-| title | String | 否 | 面试标题（默认用时间戳） |
+| resumeId | Long | 是 | 当前用户已异步解析成功且正文非空的简历 ID |
+| title | String | 否 | 面试标题（默认“公司-岗位-日期”或“岗位-日期”） |
 | companyName | String | 否 | 公司名称 |
-| positionTitle | String | 否 | 职位名称 |
+| positionTitle | String | 是 | 职位名称 |
 | industry | String | 否 | 行业分类（互联网/金融/教育等） |
-| interviewType | String | 否 | 面试类型：coding-技术面/behavioral-行为面/system_design-系统设计/comprehensive-综合 |
+| interviewType | String | 是 | 面试类型：coding-技术面/behavioral-行为面/system_design-系统设计/comprehensive-综合 |
 
 #### 3.2.2 面试处理流程（异步）
 
 ```
 上传完成 → 创建记录(status=PROCESSING) → 异步处理：
-  Step 1: 简历 PDF 提取文本 + FunASR 转写 + 句子时间戳 + 说话人角色映射 (processing_step=1)
+  Step 1: FunASR 转写 + 句子时间戳 + 说话人角色映射 (processing_step=1)
   Step 2: 识别问答对 + 生成/复用标准满分回答和评分量表 + 逐项比对 (processing_step=2)
   Step 3: 服务端计算逐题分数、各维度分数并持久化评分明细 (processing_step=3)
   Step 4: 汇总整体评分、优势、不足和改进建议 (processing_step=4)
-→ 处理完成(status=COMPLETED) 或 失败(status=FAILED)
+→ 处理完成(status=COMPLETED)、失败(status=FAILED) 或用户取消(status=CANCELLED)
 ```
 
 前端通过轮询 `/interviews/{id}/status` 获取处理进度，返回当前步骤和进度百分比。
@@ -268,7 +280,7 @@ ai-web → ai-interview → ai-common
 }
 ```
 
-**失败重试：** 支持对 status=FAILED 的面试记录重新处理，调用 `POST /interviews/{id}/retry` 接口。
+**重试与重评：** `FAILED/CANCELLED` 调用 `POST /interviews/{id}/retry` 并从已有阶段继续；`COMPLETED` 调用 `POST /interviews/{id}/reanalyze`，只重新识别问答和评分。
 
 #### 3.2.3 面试记录列表
 
@@ -348,24 +360,14 @@ ai-web → ai-interview → ai-common
 - 支持取消收藏
 - 支持按评分排序
 
-### 3.5 面试分享模块
+### 3.5 公开面经模块
 
-#### 3.5.1 生成分享链接
+#### 3.5.1 发布管理
 
-- 支持将面试复盘结果生成分享链接
-- 分享令牌必须使用密码学安全随机值生成，不得使用面试 ID、用户 ID 等可枚举信息
-- 分享链接有效期可选：24小时/7天/30天/永久
-- 支持设置可选的访问密码；服务端不得明文保存访问密码
-- 支持选择是否公开为"面经"（`isPublic`），公开面经无过期时间
-- 分享页面为只读，不允许编辑
-
-#### 3.5.2 分享页面
-
-- 展示面试复盘的完整内容（转写文本、评分、建议）
-- 不展示原始音频文件（保护隐私）
-- 不展示用户笔记（保护隐私）
-- 不展示用户账号、邮箱、简历原文等身份或关联资源
-- 匿名访问必须同时校验分享令牌、分享状态、有效期及可选访问密码；不得通过面试 ID 直接访问
+- 每场已完成面试最多对应一篇面经，公开访问使用数字 ID
+- 发布者可填写最多 10,000 字 Markdown 经验总结，可主动撤回并重新发布
+- 管理员下架后发布者不能自行恢复，只能由管理员解除限制
+- 面试删除或发起重评时自动撤回，恢复或重评完成后不自动发布
 
 #### 3.5.3 面经广场
 
@@ -378,17 +380,17 @@ ai-web → ai-interview → ai-common
 
 #### 3.5.4 面经详情页
 
-- 展示面试基本信息（标题、公司、职位、类型、整体评分）
-- 展示问题列表：每个问题的评分、改进建议和标准满分回答
+- 展示面试基本信息及发布者昵称、头像；昵称为空时不回退到用户名
+- 展示问题列表：每个问题的评分、关键差距、改进建议和标准满分回答
 - 展示多维度评分雷达图
 - 展示 AI 改进建议（优势总结、待提升方面、整体建议）
 - 展示评论列表（按时间倒序）
-- 不展示音频文件、转写文本、个人笔记（隐私保护）
+- 不展示用户原回答、音频、转写文本、简历和个人笔记（隐私保护）
 - 无需登录即可访问和查看评论
 
 #### 3.5.5 面经评论
 
-- 登录用户可在面经详情页发表评论
+- 登录用户只能在当前可见的公开面经详情页发表评论
 - 评论内容为纯文本，最长 500 字
 - 发布者可删除自己面经下的任意评论
 - 评论者可删除自己的评论
@@ -409,8 +411,8 @@ ai-web → ai-interview → ai-common
 | isDefault | 是否默认模型 |
 
 可为不同步骤配置不同模型：
-- 语音转文字：可用阿里云 ASR / Whisper
-- 文本分析和评分：可用 DeepSeek / 通义千问 / GPT
+- 语音转文字：仅使用 DashScope FunASR
+- 文本分析和评分：使用 Spring AI 接入 DeepSeek / MiMo
 
 ### 3.7 管理员模块
 
@@ -454,7 +456,7 @@ ai-web → ai-interview → ai-common
 | interview:manage | 删除或重试本人面试 | user |
 | note:manage | 查看和管理本人面试笔记及问题笔记 | user |
 | favorite:manage | 查看和管理本人收藏 | user |
-| share:manage | 查看和管理本人创建的分享 | user |
+| experience:publish | 发布、更新、撤回本人面经 | user |
 | comment:manage_own | 发表评论，以及删除本人评论或本人发布面经下的评论 | user |
 | user:read | 查询用户列表和用户详情 | admin |
 | user:status:update | 启用或禁用用户账号 | admin |
@@ -483,30 +485,32 @@ ai-web → ai-interview → ai-common
 | GET | `/auth/profile` | 登录校验 | 作为前端角色及权限状态的统一数据来源 |
 | PUT | `/auth/profile` | 登录校验 | 只能修改本人资料 |
 | PUT | `/auth/password` | 登录校验 | 只能修改本人密码并校验原密码 |
+| POST | `/resumes` | `interview:create` | 创建本人异步简历解析任务 |
+| GET | `/resumes`、`/resumes/{id}` | `interview:read` | 仅访问本人未隐藏简历 |
+| POST | `/resumes/{id}/retry` | `interview:manage` | 仅本人失败简历可重试 |
+| DELETE | `/resumes/{id}` | `interview:manage` | 仅隐藏简历；历史面试快照不受影响 |
 | POST | `/interviews/upload` | `interview:create` | 新记录归属于当前用户 |
 | GET | `/interviews` | `interview:read` | 只查询当前用户的数据 |
 | GET | `/interviews/{id}` | `interview:read` | 仅资源所有者可见 |
 | DELETE | `/interviews/{id}` | `interview:manage` | 仅资源所有者可删除 |
 | GET | `/interviews/{id}/status` | `interview:read` | 仅资源所有者可见 |
-| POST | `/interviews/{id}/retry` | `interview:manage` | 仅资源所有者且状态为失败时可重试 |
+| POST | `/interviews/{id}/cancel` | `interview:manage` | 仅资源所有者且正在处理时可取消 |
+| POST | `/interviews/{id}/retry` | `interview:manage` | 仅资源所有者且状态为失败/取消时可重试 |
+| POST | `/interviews/{id}/reanalyze` | `interview:manage` | 仅已完成面试，不重新调用 ASR |
 | GET | `/files/{filename}` | `interview:read` | 文件必须关联当前用户的面试 |
 | GET | `/asr-files/{filename}` | 签名公开接口 | 仅接受未过期且签名正确的模型取件 URL |
 | GET | `/interviews/{id}/note` | `note:manage` | 面试属于当前用户 |
-| PUT | `/interviews/{id}/note` | `note:manage` | 面试属于当前用户，支持同场多条笔记 |
+| PUT | `/interviews/{id}/note` | `note:manage` | 面试属于当前用户，同场仅一条总笔记，重复保存覆盖 |
 | GET | `/interviews/{id}/questions/{qid}/note` | `note:manage` | 面试和问题均属于当前用户 |
-| PUT | `/interviews/{id}/questions/{qid}/note` | `note:manage` | 面试和问题均属于当前用户，支持同题多条笔记 |
+| PUT | `/interviews/{id}/questions/{qid}/note` | `note:manage` | 面试和问题均属于当前用户；每题一条，同场不同题互不覆盖 |
 | POST | `/favorites` | `favorite:manage` | 目标问题必须对当前用户可见 |
 | DELETE | `/favorites/{id}` | `favorite:manage` | 收藏属于当前用户 |
 | GET | `/favorites` | `favorite:manage` | 只查询当前用户的收藏 |
-| POST | `/interviews/{id}/share` | `share:manage` | 面试属于当前用户 |
-| GET | `/interviews/{id}/shares` | `share:manage` | 面试属于当前用户 |
-| DELETE | `/shares/{token}` | `share:manage` | 分享属于当前用户 |
-| PUT | `/shares/{token}/public` | `share:manage` | 分享属于当前用户 |
-| GET | `/share/{token}` | 公开 | 校验不可预测令牌、状态、有效期及可选访问密码；不暴露原始音频和用户资料 |
+| POST/GET/PUT/DELETE | `/interviews/{id}/publication` | `experience:publish` | 仅所有者管理一篇公开面经；管理员锁定时用户不能恢复 |
 | GET | `/experiences` | 公开 | 仅返回已发布且当前可见的面经 |
-| GET | `/experiences/{token}` | 公开 | 仅返回已发布且当前可见的面经 |
-| GET | `/experiences/{token}/comments` | 公开 | 面经必须公开可见 |
-| POST | `/experiences/{token}/comments` | `comment:manage_own` | 面经必须对当前用户可见 |
+| GET | `/experiences/{id}` | 公开 | 仅返回已发布且当前可见的面经 |
+| GET | `/experiences/{id}/comments` | 公开 | 面经必须公开可见 |
+| POST | `/experiences/{id}/comments` | `comment:manage_own` | 面经必须公开可见 |
 | DELETE | `/comments/{id}` | `comment:manage_own` | 仅评论作者或面经发布者可删除 |
 | GET | `/admin/users` | `user:read` | 可按条件查询全部用户 |
 | GET | `/admin/users/{id}` | `user:read` | 目标用户存在 |
@@ -515,7 +519,7 @@ ai-web → ai-interview → ai-common
 | GET | `/admin/stats/overview` | `system:stats:read` | 统计口径仅包含允许纳入的数据 |
 | GET | `/admin/interviews` | `interview:read_all` | 跨用户只读查询 |
 | GET | `/admin/experiences` | `experience:read_all` | 查看公开及非公开面经状态 |
-| PUT | `/admin/experiences/{token}/status` | `experience:manage` | 记录状态变化审计日志 |
+| PUT | `/admin/experiences/{id}/status` | `experience:manage` | 按数字 ID 下架/恢复并记录审计日志 |
 | GET | `/admin/comments` | `comment:read_all` | 跨用户查询评论 |
 | DELETE | `/admin/comments/{id}` | `comment:manage` | 删除任意评论并记录审计日志 |
 | GET | `/admin/audit-logs` | `audit:read` | 只读分页查询，不提供修改或删除接口 |
@@ -690,7 +694,7 @@ POST /interviews/upload
 Content-Type: multipart/form-data
 
 audioFile: (binary)
-resumeFile: (binary)
+resumeId: 123
 jdText: "岗位职责：..."
 title: "2026-05-26 字节跳动后端面试"
 companyName: "字节跳动"
@@ -762,13 +766,12 @@ interviewType: "coding"
 |------|------|------|------|
 | POST | `/interviews/{id}/share` | 生成分享链接/发布面经 | 是 |
 | GET | `/interviews/{id}/shares` | 获取分享记录列表 | 是 |
-| DELETE | `/shares/{token}` | 撤销分享链接/下架面经 | 是 |
-| PUT | `/shares/{token}/public` | 切换面经公开状态 | 是 |
-| GET | `/share/{token}` | 访问分享页面（无需认证） | 否 |
+| POST/GET/PUT/DELETE | `/interviews/{id}/publication` | 发布、查询、更新或撤回本人面经 | 是 |
+| GET | `/experiences/{id}` | 访问可见公开面经 | 否 |
 | GET | `/experiences` | 面经广场列表（分页+筛选，无需认证） | 否 |
-| GET | `/experiences/{token}` | 面经详情（无需认证） | 否 |
-| GET | `/experiences/{token}/comments` | 获取面经评论列表（无需认证） | 否 |
-| POST | `/experiences/{token}/comments` | 发表评论 | 是 |
+| GET | `/experiences/{id}` | 面经详情（无需认证） | 否 |
+| GET | `/experiences/{id}/comments` | 获取面经评论列表（无需认证） | 否 |
+| POST | `/experiences/{id}/comments` | 发表评论 | 是 |
 | DELETE | `/comments/{id}` | 删除评论（评论者/发布者/管理员） | 是 |
 
 **发布面经请求示例：**
@@ -893,7 +896,7 @@ POST /experiences/abc123/comments
 | GET | `/admin/stats/overview` | 获取系统统计数据 | 是 | system:stats:read |
 | GET | `/admin/interviews` | 查看所有用户面试数据（分页） | 是 | interview:read_all |
 | GET | `/admin/experiences` | 查看所有面经（分页） | 是 | experience:read_all |
-| PUT | `/admin/experiences/{token}/status` | 下架/恢复面经 | 是 | experience:manage |
+| PUT | `/admin/experiences/{id}/status` | 下架/恢复面经 | 是 | experience:manage |
 | GET | `/admin/comments` | 查看所有评论（分页） | 是 | comment:read_all |
 | DELETE | `/admin/comments/{id}` | 删除任意评论 | 是 | comment:manage |
 
@@ -983,7 +986,7 @@ PUT /admin/users/2/role
 | 上传面试 | `/interview/upload` | 上传音频+填写JD+上传简历PDF+公司信息 |
 | 面试复盘详情 | `/interview/:id` | 核心复盘页面（含音频播放器） |
 | 我的收藏 | `/favorites` | 收藏的问题列表 |
-| 分享页面 | `/share/:token` | 只读分享页面（无需登录） |
+| 面经详情 | `/experiences/:id` | 公开面经只读详情（无需登录） |
 | 面经广场 | `/experiences` | 公开面经列表（无需登录） |
 | 面经详情 | `/experience/:token` | 面经详情页面（无需登录） |
 | AI 配置 | `/ai-config` | 管理 AI 模型配置 |
@@ -1132,7 +1135,7 @@ async:
 - 资源归属校验在业务层执行：普通用户只能访问和操作自己的面试、笔记、收藏、文件和分享记录
 - 当前不建设通用数据范围引擎；跨用户查询必须要求对应的 `*:read_all` 权限，并在查询条件中显式限定允许的数据范围
 - 评论删除规则：具有 `comment:manage_own` 的评论作者或面经发布者可按业务规则删除；删除任意评论还必须具有 `comment:manage`
-- 公开接口仅包括认证入口、公开面经列表和详情、公开面经评论列表、有效分享令牌访问，以及带有效签名的 ASR 临时取件地址
+- 公开接口仅包括认证入口、当前可见的公开面经列表和详情、公开面经评论列表，以及带有效签名的 ASR 临时取件地址
 - 面经广场只能返回已发布且当前可见的内容；草稿、下架、失效或审核中的内容不得通过公开接口访问
 - 分享访问必须校验不可预测令牌、状态、有效期及可选访问密码，并限制返回字段，禁止泄露原始音频、用户资料和其他关联资源
 - 未登录或令牌无效返回 HTTP `401`；已登录但缺少功能权限返回 `403`
@@ -1145,7 +1148,7 @@ async:
 
 ### 7.3 文件安全
 
-- 音频文件上传类型校验：仅允许 MP3、WAV 格式，最大 200MB
+- 音频文件上传校验：仅允许真实 MP3、WAV 格式，最大 2GB、最长 2 小时
 - 简历文件上传类型校验：仅允许 PDF 格式，最大 20MB
 - 文件名重命名：使用 UUID + 原始扩展名，防止路径遍历
 - 文件存储路径：与应用分离，配置化管理

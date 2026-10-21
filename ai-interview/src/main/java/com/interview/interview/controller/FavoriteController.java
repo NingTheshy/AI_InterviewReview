@@ -68,8 +68,12 @@ public class FavoriteController {
     @GetMapping
     public Result<PageResult<FavoriteResponse>> list(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Long interviewId,
+            @RequestParam(required = false) Integer minScore,
+            @RequestParam(required = false) Integer maxScore,
+            @RequestParam(defaultValue = "createdAt") String sortBy) {
         Long userId = SecurityUtils.getCurrentUserId();
-        return Result.success(favoriteService.list(userId, page, size));
+        return Result.success(favoriteService.list(userId, page, size, interviewId, minScore, maxScore, sortBy));
     }
 }

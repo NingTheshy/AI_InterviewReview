@@ -15,10 +15,10 @@ import com.interview.common.result.PageResult;
 import com.interview.common.utils.SecurityUtils;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewComment;
-import com.interview.interview.entity.InterviewShare;
+import com.interview.interview.entity.InterviewExperience;
 import com.interview.interview.mapper.InterviewCommentMapper;
 import com.interview.interview.mapper.InterviewMapper;
-import com.interview.interview.mapper.InterviewShareMapper;
+import com.interview.interview.mapper.InterviewExperienceMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -46,7 +46,7 @@ public class AdminServiceImpl implements AdminService {
 
     private final UserMapper userMapper;
     private final InterviewMapper interviewMapper;
-    private final InterviewShareMapper interviewShareMapper;
+    private final InterviewExperienceMapper interviewExperienceMapper;
     private final InterviewCommentMapper interviewCommentMapper;
     private final RbacService rbacService;
     private final AuditService auditService;
@@ -168,6 +168,7 @@ public class AdminServiceImpl implements AdminService {
         statusDistribution.put("processing", getCountByStatus(0));
         statusDistribution.put("completed", getCountByStatus(1));
         statusDistribution.put("failed", getCountByStatus(2));
+        statusDistribution.put("cancelled", getCountByStatus(3));
 
         // 平均面试评分（仅计算已完成的面试）
         LambdaQueryWrapper<Interview> scoreWrapper = new LambdaQueryWrapper<>();
@@ -185,9 +186,10 @@ public class AdminServiceImpl implements AdminService {
         }
 
         // 面经统计（公开分享）
-        LambdaQueryWrapper<InterviewShare> shareWrapper = new LambdaQueryWrapper<>();
-        shareWrapper.eq(InterviewShare::getIsPublic, 1);
-        Long totalExperiences = interviewShareMapper.selectCount(shareWrapper);
+        LambdaQueryWrapper<InterviewExperience> shareWrapper = new LambdaQueryWrapper<>();
+        shareWrapper.eq(InterviewExperience::getPublishStatus, InterviewExperience.PUBLISHED)
+                .eq(InterviewExperience::getModerationStatus, InterviewExperience.NORMAL);
+        Long totalExperiences = interviewExperienceMapper.selectCount(shareWrapper);
 
         // 评论统计
         Long totalComments = interviewCommentMapper.selectCount(null);
@@ -255,15 +257,15 @@ public class AdminServiceImpl implements AdminService {
      */
     @Override
     public PageResult<ExperienceManagementResponse> listExperiences(int page, int size) {
-        Page<InterviewShare> pageParam = new Page<>(page, size);
-        LambdaQueryWrapper<InterviewShare> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByDesc(InterviewShare::getCreatedAt);
+        Page<InterviewExperience> pageParam = new Page<>(page, size);
+        LambdaQueryWrapper<InterviewExperience> wrapper = new LambdaQueryWrapper<>();
+        wrapper.orderByDesc(InterviewExperience::getPublishedAt);
 
-        Page<InterviewShare> result = interviewShareMapper.selectPage(pageParam, wrapper);
+        Page<InterviewExperience> result = interviewExperienceMapper.selectPage(pageParam, wrapper);
 
         // 批量查询用户信息
         List<Long> userIds = result.getRecords().stream()
-                .map(InterviewShare::getUserId)
+                .map(InterviewExperience::getUserId)
                 .distinct()
                 .collect(Collectors.toList());
         Map<Long, String> usernameMap = getUsernamesByIds(userIds);
@@ -274,10 +276,11 @@ public class AdminServiceImpl implements AdminService {
                         .interviewId(share.getInterviewId())
                         .userId(share.getUserId())
                         .username(usernameMap.get(share.getUserId()))
-                        .shareToken(share.getShareToken())
-                        .isPublic(share.getIsPublic())
+                        .publishStatus(share.getPublishStatus())
+                        .moderationStatus(share.getModerationStatus())
+                        .summaryMarkdown(share.getSummaryMarkdown())
                         .viewCount(share.getViewCount())
-                        .createdAt(share.getCreatedAt())
+                        .publishedAt(share.getPublishedAt())
                         .build())
                 .collect(Collectors.toList());
 
@@ -289,23 +292,22 @@ public class AdminServiceImpl implements AdminService {
      */
     @Override
     @Transactional
-    public void setExperienceStatus(String token, Integer isPublic) {
-        LambdaQueryWrapper<InterviewShare> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InterviewShare::getShareToken, token);
-
-        InterviewShare share = interviewShareMapper.selectOne(wrapper);
+    public void setExperienceStatus(Long experienceId, Integer isPublic) {
+        InterviewExperience share = interviewExperienceMapper.selectById(experienceId);
         if (share == null) {
-            throw new BusinessException(ErrorCode.SHARE_NOT_FOUND.getCode(),
-                    ErrorCode.SHARE_NOT_FOUND.getMessage());
+            throw new BusinessException(ErrorCode.EXPERIENCE_NOT_FOUND.getCode(), ErrorCode.EXPERIENCE_NOT_FOUND.getMessage());
         }
-
-        Integer beforeStatus = share.getIsPublic();
-        share.setIsPublic(isPublic);
-        interviewShareMapper.updateById(share);
+        if (isPublic == null || (isPublic != 0 && isPublic != 1)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "面经治理状态只能是0或1");
+        }
+        String beforeStatus = share.getModerationStatus();
+        String nextStatus = isPublic == 1 ? InterviewExperience.NORMAL : InterviewExperience.BLOCKED;
+        share.setModerationStatus(nextStatus);
+        interviewExperienceMapper.updateById(share);
         auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "EXPERIENCE_STATUS_UPDATE",
-                "INTERVIEW_SHARE", String.valueOf(share.getId()), beforeStatus, isPublic);
+                "INTERVIEW_EXPERIENCE", String.valueOf(share.getId()), beforeStatus, nextStatus);
 
-        log.info("管理员设置面经状态: token={}, isPublic={}", token, isPublic);
+        log.info("管理员设置面经状态: experienceId={}, moderationStatus={}", experienceId, nextStatus);
     }
 
     // ==================== 评论管理 ====================
@@ -335,7 +337,7 @@ public class AdminServiceImpl implements AdminService {
         List<CommentManagementResponse> records = result.getRecords().stream()
                 .map(comment -> CommentManagementResponse.builder()
                         .id(comment.getId())
-                        .shareId(comment.getShareId())
+                        .experienceId(comment.getExperienceId())
                         .userId(comment.getUserId())
                         .username(usernameMap.get(comment.getUserId()))
                         .content(comment.getContent())
@@ -361,7 +363,7 @@ public class AdminServiceImpl implements AdminService {
         interviewCommentMapper.deleteById(commentId);
         auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "COMMENT_DELETE",
                 "INTERVIEW_COMMENT", String.valueOf(commentId),
-                Map.of("shareId", comment.getShareId(), "userId", comment.getUserId()), null);
+                Map.of("experienceId", comment.getExperienceId(), "userId", comment.getUserId()), null);
         log.info("管理员删除评论: commentId={}", commentId);
     }
 

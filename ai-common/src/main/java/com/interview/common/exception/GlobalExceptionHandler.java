@@ -11,6 +11,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * 全局异常处理器
@@ -44,7 +45,6 @@ public class GlobalExceptionHandler {
             case 2005, 4002 -> HttpStatus.CONFLICT;
             case 3002 -> HttpStatus.BAD_GATEWAY;
             case 3003 -> HttpStatus.INTERNAL_SERVER_ERROR;
-            case 4003, 4004 -> HttpStatus.GONE;
             // 默认
             default -> HttpStatus.BAD_REQUEST;
         };
@@ -77,6 +77,13 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> handleConstraintViolationException(ConstraintViolationException e) {
         return Result.error(400, e.getMessage());
+    }
+
+    /** 路径变量或查询参数无法转换成目标类型时返回请求错误，而不是暴露为 500。 */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return Result.error(400, "参数 " + e.getName() + " 格式不正确");
     }
 
     /** 保留底层资源访问服务设定的 HTTP 状态和响应头，例如文件 Range 错误。 */

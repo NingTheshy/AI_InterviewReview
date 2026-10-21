@@ -51,12 +51,12 @@ public class AdminExperienceController {
      * @return 操作结果
      */
     @Operation(summary = "设置面经状态")
-    @PutMapping("/{token}/status")
+    @PutMapping("/{id}/status")
     @PreAuthorize("hasAuthority('experience:manage')")
     public Result<Void> setExperienceStatus(
-            @PathVariable String token,
+            @PathVariable Long id,
             @Valid @RequestBody ExperienceStatusRequest request) {
-        adminService.setExperienceStatus(token, request.getIsPublic());
+        adminService.setExperienceStatus(id, request.getIsPublic());
         return Result.success();
     }
 }

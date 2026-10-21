@@ -98,7 +98,7 @@ public interface AdminService {
      * @param isPublic 公开状态：0=下架，1=上架
      * @throws com.interview.common.exception.BusinessException 分享不存在时抛出
      */
-    void setExperienceStatus(String token, Integer isPublic);
+    void setExperienceStatus(Long experienceId, Integer isPublic);
 
     // ==================== 评论管理 ====================
 

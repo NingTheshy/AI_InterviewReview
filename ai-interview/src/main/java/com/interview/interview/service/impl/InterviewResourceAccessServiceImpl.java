@@ -5,15 +5,13 @@ import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewQuestion;
-import com.interview.interview.entity.InterviewShare;
+import com.interview.interview.entity.InterviewExperience;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewQuestionMapper;
-import com.interview.interview.mapper.InterviewShareMapper;
+import com.interview.interview.mapper.InterviewExperienceMapper;
 import com.interview.interview.service.InterviewResourceAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-
-import java.time.LocalDateTime;
 
 /** 统一实现面试、问题的所有权与可见性校验。 */
 @Service
@@ -22,7 +20,7 @@ public class InterviewResourceAccessServiceImpl implements InterviewResourceAcce
 
     private final InterviewMapper interviewMapper;
     private final InterviewQuestionMapper questionMapper;
-    private final InterviewShareMapper shareMapper;
+    private final InterviewExperienceMapper experienceMapper;
 
     @Override
     public void requireOwnedInterview(Long interviewId, Long userId) {
@@ -46,13 +44,11 @@ public class InterviewResourceAccessServiceImpl implements InterviewResourceAcce
             return;
         }
 
-        LambdaQueryWrapper<InterviewShare> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InterviewShare::getInterviewId, interviewId);
-        wrapper.eq(InterviewShare::getIsPublic, 1);
-        wrapper.and(condition -> condition.isNull(InterviewShare::getExpireAt)
-                .or()
-                .gt(InterviewShare::getExpireAt, LocalDateTime.now()));
-        if (shareMapper.selectCount(wrapper) == 0) {
+        LambdaQueryWrapper<InterviewExperience> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(InterviewExperience::getInterviewId, interviewId)
+                .eq(InterviewExperience::getPublishStatus, InterviewExperience.PUBLISHED)
+                .eq(InterviewExperience::getModerationStatus, InterviewExperience.NORMAL);
+        if (experienceMapper.selectCount(wrapper) == 0) {
             throw new BusinessException(ErrorCode.INTERVIEW_ACCESS_DENIED.getCode(),
                     ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
         }

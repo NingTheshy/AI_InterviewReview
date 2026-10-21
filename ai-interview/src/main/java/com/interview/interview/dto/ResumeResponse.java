@@ -15,6 +15,7 @@ public class ResumeResponse {
     private Long fileSize;
     private Integer parseStatus;
     private String parseError;
+    private Integer retryCount;
     private LocalDateTime createdAt;
 
     public static ResumeResponse from(UserResume resume) {
@@ -24,6 +25,7 @@ public class ResumeResponse {
                 .fileSize(resume.getFileSize())
                 .parseStatus(resume.getParseStatus())
                 .parseError(resume.getParseError())
+                .retryCount(resume.getRetryCount())
                 .createdAt(resume.getCreatedAt())
                 .build();
     }

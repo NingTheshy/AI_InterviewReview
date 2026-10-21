@@ -45,7 +45,6 @@ class CommentControllerTest {
     private CommentController commentController;
 
     private static final Long TEST_USER_ID = 1L;
-    private static final String TEST_TOKEN = "abc123def456";
     private static final Long TEST_COMMENT_ID = 20L;
 
     @BeforeEach
@@ -76,9 +75,9 @@ class CommentControllerTest {
                     .build();
             PageResult<CommentResponse> pageResult = new PageResult<>(
                     List.of(comment), 1, 1, 20);
-            when(commentService.listByShareToken(anyString(), anyInt(), anyInt())).thenReturn(pageResult);
+            when(commentService.listByExperienceId(anyLong(), anyInt(), anyInt())).thenReturn(pageResult);
 
-            mockMvc.perform(get("/experiences/{token}/comments", TEST_TOKEN)
+            mockMvc.perform(get("/experiences/{id}/comments", 1L)
                             .param("page", "1")
                             .param("size", "20"))
                     .andExpect(status().isOk())
@@ -97,9 +96,9 @@ class CommentControllerTest {
         void addComment_Success() throws Exception {
             CommentRequest request = new CommentRequest();
             request.setContent("很好的面经！");
-            doNothing().when(commentService).addComment(anyString(), anyLong(), anyString());
+            doNothing().when(commentService).addComment(anyLong(), anyLong(), anyString());
 
-            mockMvc.perform(post("/experiences/{token}/comments", TEST_TOKEN)
+            mockMvc.perform(post("/experiences/{id}/comments", 1L)
                             .contentType("application/json")
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
@@ -112,7 +111,7 @@ class CommentControllerTest {
             CommentRequest request = new CommentRequest();
             request.setContent("");
 
-            mockMvc.perform(post("/experiences/{token}/comments", TEST_TOKEN)
+            mockMvc.perform(post("/experiences/{id}/comments", 1L)
                             .contentType("application/json")
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest());

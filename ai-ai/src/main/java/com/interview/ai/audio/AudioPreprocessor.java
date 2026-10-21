@@ -33,6 +33,7 @@ import java.util.regex.Pattern;
 public class AudioPreprocessor {
 
     private static final Pattern DURATION_PATTERN = Pattern.compile("Duration: (\\d{2}):(\\d{2}):(\\d{2}(?:\\.\\d+)?)");
+    private static final Pattern INPUT_FORMAT_PATTERN = Pattern.compile("Input #0,\\s*([^,]+),\\s*from", Pattern.CASE_INSENSITIVE);
 
     private final FfmpegResolver ffmpegResolver;
 
@@ -149,6 +150,18 @@ public class AudioPreprocessor {
                     .start();
             String output = new String(process.getInputStream().readAllBytes());
             process.waitFor();
+            Matcher formatMatcher = INPUT_FORMAT_PATTERN.matcher(output);
+            if (!formatMatcher.find()) {
+                throw new BusinessException(ErrorCode.AUDIO_FORMAT_NOT_SUPPORTED.getCode(), "无法识别真实音频格式");
+            }
+            String detected = formatMatcher.group(1).trim().toLowerCase();
+            String filename = inputFile.getFileName().toString().toLowerCase();
+            boolean matches = filename.endsWith(".mp3") ? detected.contains("mp3")
+                    : filename.endsWith(".wav") && (detected.contains("wav") || detected.contains("wave"));
+            if (!matches) {
+                throw new BusinessException(ErrorCode.AUDIO_FORMAT_NOT_SUPPORTED.getCode(),
+                        "音频真实格式与扩展名不一致，仅支持MP3或WAV");
+            }
             Matcher matcher = DURATION_PATTERN.matcher(output);
             if (!matcher.find()) {
                 throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "无法读取音频时长，请检查文件是否损坏");

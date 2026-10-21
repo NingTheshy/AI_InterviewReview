@@ -17,6 +17,7 @@ import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewQuestionMapper;
 import com.interview.interview.service.InterviewAsyncService;
 import com.interview.interview.service.ResumeService;
+import com.interview.interview.service.ExperienceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -56,6 +57,9 @@ class InterviewServiceImplTest {
 
     @Mock
     private ResumeService resumeService;
+
+    @Mock
+    private ExperienceService experienceService;
 
     @Mock
     private AudioPreprocessor audioPreprocessor;
@@ -110,9 +114,6 @@ class InterviewServiceImplTest {
         void upload_Success() {
             MockMultipartFile audioFile = new MockMultipartFile(
                     "audio", "test.wav", "audio/wav", "audio content".getBytes());
-            MockMultipartFile resumeFile = new MockMultipartFile(
-                    "resume", "resume.pdf", "application/pdf", "resume content".getBytes());
-
             doAnswer(invocation -> {
                 Interview arg = invocation.getArgument(0);
                 arg.setId(TEST_INTERVIEW_ID);
@@ -120,7 +121,7 @@ class InterviewServiceImplTest {
             }).when(interviewMapper).insert(any(Interview.class));
             stubUploadDependencies();
 
-            Long id = interviewService.upload(TEST_USER_ID, audioFile, resumeFile, "JD文本",
+            Long id = interviewService.upload(TEST_USER_ID, audioFile, 10L, "JD文本",
                     "面试标题", "阿里巴巴", "Java开发", "互联网", "coding");
 
             assertNotNull(id);
@@ -129,25 +130,13 @@ class InterviewServiceImplTest {
         }
 
         @Test
-        @DisplayName("上传面试 - 最小参数（仅必填字段）")
-        void upload_MinimalParams() {
+        @DisplayName("上传面试 - 缺少岗位与类型被拒绝")
+        void upload_MissingRequiredMetadata() {
             MockMultipartFile audioFile = new MockMultipartFile(
                     "audio", "test.wav", "audio/wav", "audio content".getBytes());
-            MockMultipartFile resumeFile = new MockMultipartFile(
-                    "resume", "resume.pdf", "application/pdf", "resume content".getBytes());
-
-            doAnswer(invocation -> {
-                Interview arg = invocation.getArgument(0);
-                arg.setId(TEST_INTERVIEW_ID);
-                return 1;
-            }).when(interviewMapper).insert(any(Interview.class));
-            stubUploadDependencies();
-
-            Long id = interviewService.upload(TEST_USER_ID, audioFile, resumeFile, "JD文本",
-                    null, null, null, null, null);
-
-            assertNotNull(id);
-            verify(interviewAsyncService).processInterview(anyLong(), anyString());
+            assertThrows(BusinessException.class, () -> interviewService.upload(TEST_USER_ID, audioFile, 10L,
+                    "JD文本", null, null, null, null, null));
+            verifyNoInteractions(interviewAsyncService);
         }
     }
 
@@ -352,7 +341,7 @@ class InterviewServiceImplTest {
         resume.setId(10L);
         resume.setFilePath("resumes/resume.pdf");
         resume.setParsedText("Java开发经验");
-        when(resumeService.upload(eq(TEST_USER_ID), any())).thenReturn(resume);
+        when(resumeService.requireReady(10L, TEST_USER_ID)).thenReturn(resume);
         when(audioPreprocessor.probeDuration(any(Path.class))).thenReturn(60D);
         when(aiClientFactory.snapshotDefault(any())).thenReturn("encrypted-snapshot");
     }

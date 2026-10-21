@@ -13,10 +13,10 @@ import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewComment;
-import com.interview.interview.entity.InterviewShare;
+import com.interview.interview.entity.InterviewExperience;
 import com.interview.interview.mapper.InterviewCommentMapper;
 import com.interview.interview.mapper.InterviewMapper;
-import com.interview.interview.mapper.InterviewShareMapper;
+import com.interview.interview.mapper.InterviewExperienceMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -50,7 +50,7 @@ class AdminServiceImplTest {
     private InterviewMapper interviewMapper;
 
     @Mock
-    private InterviewShareMapper interviewShareMapper;
+    private InterviewExperienceMapper interviewExperienceMapper;
 
     @Mock
     private InterviewCommentMapper interviewCommentMapper;
@@ -196,7 +196,8 @@ class AdminServiceImplTest {
                     .thenReturn(10L)   // status=0 (processing)
                     .thenReturn(470L)  // status=1 (completed)
                     .thenReturn(12L)   // status=2 (failed)
-                    .thenReturn(0L);   // score query (no completed with scores)
+                    .thenReturn(0L)    // status=3 (cancelled)
+                    .thenReturn(0L);
 
             // Mock for completed interviews with scores
             Interview completedInterview = new Interview();
@@ -204,7 +205,7 @@ class AdminServiceImplTest {
             when(interviewMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(completedInterview));
 
-            when(interviewShareMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(50L);
+            when(interviewExperienceMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(50L);
             when(interviewCommentMapper.selectCount(isNull())).thenReturn(200L);
 
             // Act
@@ -217,7 +218,7 @@ class AdminServiceImplTest {
             assertEquals(50L, response.getTotalExperiences());
             assertEquals(200L, response.getTotalComments());
             assertNotNull(response.getStatusDistribution());
-            assertEquals(3, response.getStatusDistribution().size());
+            assertEquals(4, response.getStatusDistribution().size());
             assertNotNull(response.getAverageScore());
         }
     }
@@ -329,16 +330,16 @@ class AdminServiceImplTest {
     @DisplayName("面经管理方法测试")
     class ExperienceManagementTest {
 
-        private InterviewShare testShare;
+        private InterviewExperience testShare;
 
         @BeforeEach
         void setUp() {
-            testShare = new InterviewShare();
+            testShare = new InterviewExperience();
             testShare.setId(1L);
             testShare.setInterviewId(100L);
             testShare.setUserId(TEST_USER_ID);
-            testShare.setShareToken("testtoken123");
-            testShare.setIsPublic(1);
+            testShare.setPublishStatus(InterviewExperience.PUBLISHED);
+            testShare.setModerationStatus(InterviewExperience.NORMAL);
             testShare.setViewCount(100);
             testShare.setCreatedAt(LocalDateTime.now());
         }
@@ -347,11 +348,11 @@ class AdminServiceImplTest {
         @DisplayName("获取面经列表成功")
         void listExperiences_Success() {
             // Arrange
-            Page<InterviewShare> page = new Page<>(1, 10);
+            Page<InterviewExperience> page = new Page<>(1, 10);
             page.setRecords(Arrays.asList(testShare));
             page.setTotal(1);
 
-            when(interviewShareMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(page);
+            when(interviewExperienceMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(page);
             when(userMapper.selectList(any(QueryWrapper.class)))
                     .thenReturn(Arrays.asList(testUser));
 
@@ -361,18 +362,18 @@ class AdminServiceImplTest {
             // Assert
             assertNotNull(result);
             assertEquals(1, result.getRecords().size());
-            assertEquals("testtoken123", result.getRecords().get(0).getShareToken());
+            assertEquals(InterviewExperience.NORMAL, result.getRecords().get(0).getModerationStatus());
         }
 
         @Test
         @DisplayName("获取面经列表 - 空列表")
         void listExperiences_Empty() {
             // Arrange
-            Page<InterviewShare> page = new Page<>(1, 10);
+            Page<InterviewExperience> page = new Page<>(1, 10);
             page.setRecords(Collections.emptyList());
             page.setTotal(0);
 
-            when(interviewShareMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(page);
+            when(interviewExperienceMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(page);
 
             // Act
             PageResult<ExperienceManagementResponse> result = adminService.listExperiences(1, 10);
@@ -386,27 +387,26 @@ class AdminServiceImplTest {
         @DisplayName("设置面经状态成功")
         void setExperienceStatus_Success() {
             // Arrange
-            testShare.setIsPublic(1);
-            when(interviewShareMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(testShare);
-            when(interviewShareMapper.updateById(any(InterviewShare.class))).thenReturn(1);
+            when(interviewExperienceMapper.selectById(1L)).thenReturn(testShare);
+            when(interviewExperienceMapper.updateById(any(InterviewExperience.class))).thenReturn(1);
 
             // Act
-            adminService.setExperienceStatus("testtoken123", 0);
+            adminService.setExperienceStatus(1L, 0);
 
             // Assert
-            assertEquals(0, testShare.getIsPublic());
-            verify(interviewShareMapper).updateById(any(InterviewShare.class));
+            assertEquals(InterviewExperience.BLOCKED, testShare.getModerationStatus());
+            verify(interviewExperienceMapper).updateById(any(InterviewExperience.class));
         }
 
         @Test
         @DisplayName("设置面经状态 - 分享不存在")
         void setExperienceStatus_NotFound() {
             // Arrange
-            when(interviewShareMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
+            when(interviewExperienceMapper.selectById(99L)).thenReturn(null);
 
             // Act & Assert
             assertThrows(BusinessException.class,
-                    () -> adminService.setExperienceStatus("nonexistent", 0));
+                    () -> adminService.setExperienceStatus(99L, 0));
         }
     }
 
@@ -422,7 +422,7 @@ class AdminServiceImplTest {
         void setUp() {
             testComment = new InterviewComment();
             testComment.setId(1L);
-            testComment.setShareId(10L);
+            testComment.setExperienceId(10L);
             testComment.setUserId(TEST_USER_ID);
             testComment.setContent("很好的面试分享！");
             testComment.setCreatedAt(LocalDateTime.now());

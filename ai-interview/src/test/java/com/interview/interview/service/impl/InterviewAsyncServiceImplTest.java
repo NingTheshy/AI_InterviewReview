@@ -10,6 +10,7 @@ import com.interview.common.constant.InterviewStatus;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewQuestionMapper;
+import com.interview.interview.service.QuestionStandardCacheService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,9 @@ class InterviewAsyncServiceImplTest {
     @Mock
     private CompanyClassifier companyClassifier;
 
+    @Mock
+    private QuestionStandardCacheService standardCacheService;
+
     @InjectMocks
     private InterviewAsyncServiceImpl interviewAsyncService;
 
@@ -81,18 +85,20 @@ class InterviewAsyncServiceImplTest {
                 new TranscriptionResult("面试对话文本",
                         List.of(new AsrSentence("面试对话文本", "0", "UNKNOWN", 0, 1000)), 1));
         when(companyClassifier.classify(isNull(), isNull(), isNull())).thenReturn(CompanyTier.TIER_3);
-        when(scoringService.analyzeWithRubricSnapshot(anyString(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList()))
+        when(standardCacheService.load(testInterview)).thenReturn(List.of());
+        when(scoringService.analyzeWithRubricSnapshot(anyString(), isNull(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList()))
                 .thenReturn("{\"overallScore\":85,\"questions\":[]}");
-        when(scoreResultParser.parseAndSave(eq(testInterview), anyString())).thenReturn(1);
+        when(scoreResultParser.parseAndSave(eq(testInterview), anyString(), eq("test-token"))).thenReturn(1);
+        when(interviewMapper.completeTask(TEST_INTERVIEW_ID, "test-token")).thenReturn(1);
 
         interviewAsyncService.processInterview(TEST_INTERVIEW_ID, "test-token");
 
         verify(interviewMapper, atLeast(2)).updateById(any(Interview.class));
         verify(transcriptionService).transcribeDetailedWithSnapshot(anyString(), isNull());
         verify(companyClassifier).classify(isNull(), isNull(), isNull());
-        verify(scoringService).analyzeWithRubricSnapshot(anyString(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList());
-        verify(scoreResultParser).parseAndSave(eq(testInterview), anyString());
-        org.junit.jupiter.api.Assertions.assertEquals(InterviewStatus.COMPLETED.getCode(), testInterview.getStatus());
+        verify(scoringService).analyzeWithRubricSnapshot(anyString(), isNull(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList());
+        verify(scoreResultParser).parseAndSave(eq(testInterview), anyString(), eq("test-token"));
+        verify(interviewMapper).completeTask(TEST_INTERVIEW_ID, "test-token");
     }
 
     @Test
@@ -116,7 +122,7 @@ class InterviewAsyncServiceImplTest {
 
         interviewAsyncService.processInterview(TEST_INTERVIEW_ID, "test-token");
 
-        verify(interviewMapper, atLeastOnce()).updateById(argThat(interview ->
-                interview.getStatus() == InterviewStatus.FAILED.getCode()));
+        verify(interviewMapper).finishTaskWithError(eq(TEST_INTERVIEW_ID), eq("test-token"),
+                eq(InterviewStatus.FAILED.getCode()), eq("PROCESSING_FAILED"), anyString());
     }
 }

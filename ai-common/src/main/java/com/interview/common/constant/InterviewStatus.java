@@ -15,7 +15,8 @@ public enum InterviewStatus {
 
     PROCESSING(0, "处理中"),
     COMPLETED(1, "已完成"),
-    FAILED(2, "失败");
+    FAILED(2, "失败"),
+    CANCELLED(3, "已取消");
 
     private final int code;
     private final String description;

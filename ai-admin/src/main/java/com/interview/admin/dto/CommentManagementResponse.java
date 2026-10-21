@@ -20,7 +20,7 @@ public class CommentManagementResponse {
     private Long id;
 
     /** 分享 ID */
-    private Long shareId;
+    private Long experienceId;
 
     /** 用户 ID */
     private Long userId;

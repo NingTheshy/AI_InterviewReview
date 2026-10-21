@@ -44,6 +44,21 @@ public class ResumeController {
                 .map(ResumeResponse::from).toList());
     }
 
+    @Operation(summary = "获取简历解析状态")
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('interview:read')")
+    public Result<ResumeResponse> get(@PathVariable Long id) {
+        return Result.success(ResumeResponse.from(resumeService.get(id, SecurityUtils.getCurrentUserId())));
+    }
+
+    @Operation(summary = "重试失败的简历解析")
+    @PostMapping("/{id}/retry")
+    @PreAuthorize("hasAuthority('interview:manage')")
+    public Result<Void> retry(@PathVariable Long id) {
+        resumeService.retry(id, SecurityUtils.getCurrentUserId());
+        return Result.success();
+    }
+
     @Operation(summary = "从简历库隐藏简历")
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('interview:manage')")

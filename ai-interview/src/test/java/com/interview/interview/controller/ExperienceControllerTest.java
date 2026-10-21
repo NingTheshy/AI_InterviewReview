@@ -60,7 +60,7 @@ class ExperienceControllerTest {
         @DisplayName("获取面经列表成功")
         void list_Success() throws Exception {
             ExperienceListResponse item = ExperienceListResponse.builder()
-                    .token(TEST_TOKEN)
+                    .id(1L)
                     .title("Java 面试")
                     .companyName("阿里巴巴")
                     .build();
@@ -102,13 +102,13 @@ class ExperienceControllerTest {
         @DisplayName("获取面经详情成功")
         void getDetail_Success() throws Exception {
             ExperienceDetailResponse detail = ExperienceDetailResponse.builder()
-                    .token(TEST_TOKEN)
+                    .id(1L)
                     .title("Java 面试")
                     .companyName("阿里巴巴")
                     .build();
-            when(experienceService.getDetail(anyString())).thenReturn(detail);
+            when(experienceService.getDetail(anyLong())).thenReturn(detail);
 
-            mockMvc.perform(get("/experiences/{token}", TEST_TOKEN))
+            mockMvc.perform(get("/experiences/{id}", 1L))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.title").value("Java 面试"));
@@ -117,10 +117,10 @@ class ExperienceControllerTest {
         @Test
         @DisplayName("获取面经详情 - 面经不存在")
         void getDetail_NotFound() throws Exception {
-            when(experienceService.getDetail(anyString()))
+            when(experienceService.getDetail(anyLong()))
                     .thenThrow(new BusinessException(5003, "面经已下架或不存在"));
 
-            mockMvc.perform(get("/experiences/{token}", TEST_TOKEN))
+            mockMvc.perform(get("/experiences/{id}", 1L))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value(5003));
         }

@@ -35,12 +35,12 @@ public class CommentController {
      * @return 评论列表（分页）
      */
     @Operation(summary = "获取面经评论列表（无需认证）")
-    @GetMapping("/experiences/{token}/comments")
+    @GetMapping("/experiences/{id}/comments")
     public Result<PageResult<CommentResponse>> listComments(
-            @PathVariable String token,
+            @PathVariable Long id,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return Result.success(commentService.listByShareToken(token, page, size));
+        return Result.success(commentService.listByExperienceId(id, page, size));
     }
 
     /**
@@ -51,12 +51,12 @@ public class CommentController {
      * @return 操作结果
      */
     @Operation(summary = "发表评论")
-    @PostMapping("/experiences/{token}/comments")
+    @PostMapping("/experiences/{id}/comments")
     @PreAuthorize("hasAuthority('comment:manage_own')")
-    public Result<Void> addComment(@PathVariable String token,
+    public Result<Void> addComment(@PathVariable Long id,
                                    @Valid @RequestBody CommentRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
-        commentService.addComment(token, userId, request.getContent());
+        commentService.addComment(id, userId, request.getContent());
         return Result.success();
     }
 

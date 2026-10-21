@@ -43,6 +43,10 @@ CREATE TABLE `user_resume` (
     `parsed_text` LONGTEXT NOT NULL COMMENT '解析后的不可变简历正文',
     `parse_status` TINYINT NOT NULL DEFAULT 0 COMMENT '解析状态: 0-处理中 1-成功 2-失败',
     `parse_error` VARCHAR(500) COMMENT '解析失败原因',
+    `processing_token` VARCHAR(64) COMMENT '当前解析任务令牌',
+    `lease_expires_at` DATETIME COMMENT '解析任务租约到期时间',
+    `heartbeat_at` DATETIME COMMENT '解析任务最后心跳时间',
+    `retry_count` INT NOT NULL DEFAULT 0 COMMENT '解析重试次数',
     `deleted` TINYINT DEFAULT 0 COMMENT '从简历库隐藏: 0-可用 1-隐藏',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -62,7 +66,7 @@ CREATE TABLE `interview` (
     `industry` VARCHAR(50) COMMENT '行业分类',
     `company_tier` TINYINT COMMENT '公司分级: 1-超大厂 2-大厂 3-中厂 4-小厂 5-初创（内部使用，前端不展示）',
     `interview_type` VARCHAR(30) COMMENT '面试类型: coding/behavioral/system_design/comprehensive',
-    `resume_id` BIGINT NOT NULL COMMENT '绑定的用户简历版本ID',
+    `resume_id` BIGINT COMMENT '绑定的用户简历版本ID；历史数据清理后置空',
     `audio_file_path` VARCHAR(500) COMMENT '音频文件存储路径',
     `audio_file_size` BIGINT COMMENT '音频文件大小(字节)',
     `audio_duration` INT COMMENT '音频时长(秒)',
@@ -80,7 +84,7 @@ CREATE TABLE `interview` (
     `improvement_summary` TEXT COMMENT '整体改进建议',
     `strengths` TEXT COMMENT '优势总结',
     `weaknesses` TEXT COMMENT '待提升方面',
-    `status` TINYINT DEFAULT 0 COMMENT '状态: 0-处理中 1-已完成 2-失败',
+    `status` TINYINT DEFAULT 0 COMMENT '状态: 0-处理中 1-已完成 2-失败 3-已取消',
     `processing_step` TINYINT DEFAULT 0 COMMENT '处理步骤: 0-未开始 1-FunASR转写 2-标准生成与比对 3-计分保存 4-整体总结',
     `processing_token` VARCHAR(64) COMMENT '当前工作线程令牌',
     `lease_expires_at` DATETIME COMMENT '任务租约到期时间',
@@ -109,7 +113,7 @@ CREATE TABLE `interview` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试记录表';
 
 -- -----------------------------------------------------------
--- 3. 面试问题表
+-- 4. 面试问题表
 -- -----------------------------------------------------------
 CREATE TABLE `interview_question` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '问题ID',
@@ -133,15 +137,20 @@ CREATE TABLE `interview_question` (
     `reference_answer` TEXT COMMENT '参考答案',
     `answer_difference` TEXT COMMENT '用户答案与满分标准的关键差距',
     `rubric_detail` LONGTEXT COMMENT '评分量表与逐要点比对结果(JSON)',
+    `question_fingerprint` CHAR(64) COMMENT '规范化题目与时间范围指纹',
+    `is_active` TINYINT NOT NULL DEFAULT 1 COMMENT '是否为当前有效问题: 0-归档 1-有效',
+    `archived_at` DATETIME COMMENT '问题归档时间',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX `idx_interview_id` (`interview_id`),
-    INDEX `idx_question_index` (`interview_id`, `question_index`)
+    INDEX `idx_question_index` (`interview_id`, `question_index`),
+    INDEX `idx_question_active` (`interview_id`, `is_active`),
+    INDEX `idx_question_fingerprint` (`interview_id`, `question_fingerprint`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试问题表';
 
 -- -----------------------------------------------------------
--- 4. 面试笔记表
+-- 5. 面试笔记表
 -- -----------------------------------------------------------
 CREATE TABLE `interview_note` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '笔记ID',
@@ -158,56 +167,82 @@ CREATE TABLE `interview_note` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试笔记表';
 
 -- -----------------------------------------------------------
--- 5. 问题收藏表
+-- 6. 问题收藏表
 -- -----------------------------------------------------------
 CREATE TABLE `interview_favorite` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '收藏ID',
     `user_id` BIGINT NOT NULL COMMENT '用户ID',
     `interview_id` BIGINT NOT NULL COMMENT '面试记录ID',
-    `question_id` BIGINT COMMENT '问题ID(为NULL时表示收藏整个面试)',
+    `question_id` BIGINT NOT NULL COMMENT '问题ID',
     `remark` VARCHAR(500) COMMENT '收藏备注',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE INDEX `uk_favorite_user_question` (`user_id`, `question_id`),
     INDEX `idx_user_id` (`user_id`),
     INDEX `idx_interview_id` (`interview_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='问题收藏表';
 
 -- -----------------------------------------------------------
--- 6. 面试分享表
+-- 7. 面经发布表
 -- -----------------------------------------------------------
-CREATE TABLE `interview_share` (
-    `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '分享ID',
+CREATE TABLE `interview_experience` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '面经ID',
     `interview_id` BIGINT NOT NULL COMMENT '面试记录ID',
-    `user_id` BIGINT NOT NULL COMMENT '用户ID',
-    `share_token` VARCHAR(64) NOT NULL COMMENT '分享令牌(唯一)',
-    `expire_at` DATETIME COMMENT '过期时间(NULL表示永久有效)',
-    `is_public` TINYINT DEFAULT 0 COMMENT '是否公开面经: 0-否 1-是',
+    `user_id` BIGINT NOT NULL COMMENT '发布者用户ID',
+    `summary_markdown` LONGTEXT COMMENT '发布者经验总结Markdown，最多10000字',
+    `publish_status` VARCHAR(20) NOT NULL DEFAULT 'PUBLISHED' COMMENT '用户发布状态: PUBLISHED/WITHDRAWN',
+    `moderation_status` VARCHAR(20) NOT NULL DEFAULT 'NORMAL' COMMENT '治理状态: NORMAL/BLOCKED',
+    `published_at` DATETIME COMMENT '最近发布时间',
     `view_count` INT DEFAULT 0 COMMENT '浏览量',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    UNIQUE INDEX `uk_share_token` (`share_token`),
-    INDEX `idx_interview_id` (`interview_id`),
-    INDEX `idx_is_public` (`is_public`),
-    INDEX `idx_public_created` (`is_public`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试分享表';
+    UNIQUE INDEX `uk_experience_interview` (`interview_id`),
+    INDEX `idx_experience_user` (`user_id`),
+    INDEX `idx_experience_visible` (`publish_status`, `moderation_status`, `published_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公开面经发布表';
 
 -- -----------------------------------------------------------
--- 7. 面经评论表
+-- 8. 面经评论表
 -- -----------------------------------------------------------
 CREATE TABLE `interview_comment` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '评论ID',
-    `share_id` BIGINT NOT NULL COMMENT '面经分享ID',
+    `experience_id` BIGINT NOT NULL COMMENT '公开面经ID',
     `user_id` BIGINT NOT NULL COMMENT '评论者用户ID',
     `content` VARCHAR(500) NOT NULL COMMENT '评论内容',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX `idx_share_id` (`share_id`),
+    INDEX `idx_experience_id` (`experience_id`),
     INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面经评论表';
 
 -- -----------------------------------------------------------
--- 8. AI 模型配置表
+-- 9. 标准答案缓存表
+-- -----------------------------------------------------------
+CREATE TABLE `question_standard_cache` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '标准答案缓存ID',
+    `cache_key` CHAR(64) NOT NULL COMMENT '规范化上下文SHA-256',
+    `scope_type` VARCHAR(20) NOT NULL COMMENT '作用域: GENERIC/PERSONAL',
+    `question_text` TEXT NOT NULL COMMENT '规范化前题目',
+    `context_digest` CHAR(64) NOT NULL COMMENT '岗位公司简历等上下文摘要',
+    `user_id` BIGINT COMMENT '个性化缓存所属用户',
+    `interview_id` BIGINT COMMENT '个性化缓存所属面试',
+    `resume_id` BIGINT COMMENT '个性化缓存绑定简历版本',
+    `provider` VARCHAR(50) NOT NULL COMMENT '模型提供商',
+    `model_name` VARCHAR(100) NOT NULL COMMENT '模型名称',
+    `config_version` VARCHAR(100) NOT NULL COMMENT '配置版本摘要',
+    `prompt_version` VARCHAR(50) NOT NULL COMMENT '提示词版本',
+    `reference_answer` LONGTEXT NOT NULL COMMENT '标准满分答案',
+    `rubric_detail` LONGTEXT NOT NULL COMMENT '评分量表JSON',
+    `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE INDEX `uk_standard_cache_key` (`cache_key`),
+    INDEX `idx_standard_scope` (`scope_type`, `user_id`, `interview_id`, `resume_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='标准答案与评分量表缓存表';
+
+-- -----------------------------------------------------------
+-- 10. AI 模型配置表
 -- -----------------------------------------------------------
 CREATE TABLE `ai_config` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '配置ID',
@@ -232,7 +267,7 @@ CREATE TABLE `ai_config` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI模型配置表';
 
 -- -----------------------------------------------------------
--- 9. 角色表
+-- 11. 角色表
 -- -----------------------------------------------------------
 CREATE TABLE `role` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '角色ID',
@@ -247,7 +282,7 @@ CREATE TABLE `role` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色表';
 
 -- -----------------------------------------------------------
--- 10. 权限表
+-- 12. 权限表
 -- -----------------------------------------------------------
 CREATE TABLE `permission` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '权限ID',
@@ -258,7 +293,7 @@ CREATE TABLE `permission` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限表';
 
 -- -----------------------------------------------------------
--- 11. 用户角色关联表
+-- 13. 用户角色关联表
 -- -----------------------------------------------------------
 CREATE TABLE `user_role` (
     `user_id` BIGINT NOT NULL COMMENT '用户ID',
@@ -269,7 +304,7 @@ CREATE TABLE `user_role` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户角色关联表';
 
 -- -----------------------------------------------------------
--- 12. 角色权限关联表
+-- 14. 角色权限关联表
 -- -----------------------------------------------------------
 CREATE TABLE `role_permission` (
     `role_id` BIGINT NOT NULL COMMENT '角色ID',
@@ -280,7 +315,7 @@ CREATE TABLE `role_permission` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色权限关联表';
 
 -- -----------------------------------------------------------
--- 13. 权限与高风险操作审计日志表
+-- 15. 权限与高风险操作审计日志表
 -- -----------------------------------------------------------
 CREATE TABLE `permission_audit_log` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '审计日志ID',

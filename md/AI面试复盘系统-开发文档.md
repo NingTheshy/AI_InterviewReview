@@ -1,12 +1,14 @@
 # AI 面试复盘系统 - 开发文档
 
-> 版本: v2.2
-> 日期: 2026-10-20
+> 版本: v2.3
+> 日期: 2026-10-21
 > 适用对象: 项目开发人员、运维人员、技术负责人
 
 > 评分实现更新：本文后续关于阶梯制评分和 `SCORING_TWO_PHASE` 的描述属于旧版本。当前处理流程为“识别问答 → 生成满分答案与量表 → 逐项比对 → 服务端计分 → 整场汇总”，以根目录 `README.md` 和 `RubricScoringService` 为准。数据库完整结构以 `sql/schema.sql` 为准。
 
-> AI 技术栈更新：所有生产文本模型均通过 Spring AI `ChatModel` 调用；Whisper 使用 Spring AI 官方转写模型；FunASR 因 Spring AI 1.1.8 尚无官方 DashScope 转写 provider，使用项目自定义的 Spring AI `TranscriptionModel`。旧 WebFlux 模型客户端已删除。
+> AI 技术栈更新：所有生产文本模型均通过 Spring AI `ChatModel` 调用；ASR 仅保留 FunASR，并通过项目自定义的 Spring AI `TranscriptionModel` 接入 DashScope。Whisper 和旧 WebFlux 模型客户端均已删除。
+
+> 面试闭环更新：简历改为 `/resumes` 独立异步解析；面试创建只传 `resumeId`。音频上限为 2GB/2 小时。任务支持取消、阶段重试、重评与租约接管；私密分享已移除，统一使用 `/interviews/{id}/publication` 和 `/experiences/{id}` 公开面经接口。后续旧章节若冲突，以本段、README 和当前源码为准。
 
 ---
 
@@ -36,7 +38,7 @@
 |------|------|------|
 | Java | 17 LTS | 编程语言 |
 | Spring Boot | 3.5.15 | 后端框架 |
-| Spring AI | 1.1.8 | DeepSeek、MiMo、Whisper 与 FunASR 的统一模型调用层 |
+| Spring AI | 1.1.8 | DeepSeek、MiMo 与 FunASR 的统一模型调用层 |
 | Spring Security | 6.2.x | 安全认证 |
 | MyBatis-Plus | 3.5.5 | ORM 框架 |
 | MySQL | 8.0+ | 关系型数据库 |
@@ -137,7 +139,7 @@ source /path/to/AI_InterviewReview/sql/data.sql
 **初始化数据脚本自动完成：**
 - 初始化角色数据（admin、user）
 - 初始化 20 项权限及角色权限关系
-- 初始化默认 AI 配置（DeepSeek、Whisper、FunASR、MIMO）
+- 初始化默认 AI 配置（DeepSeek、FunASR、MiMo）
 - 不创建固定密码的管理员账号；首个管理员由 `RBAC_BOOTSTRAP_ADMIN_*` 环境变量安全引导创建
 
 ### 2.5 第四步：配置修改
@@ -182,7 +184,6 @@ source ~/.bashrc
 |------|------|---------|
 | DeepSeek | 文本分析与评分 | https://platform.deepseek.com/ |
 | 小米 MiMo | LLM + ASR（可选） | https://xiaoai.mi.com/ |
-| OpenAI Whisper | 语音转文字（可选） | https://platform.openai.com/ |
 | 阿里云 DashScope | ASR（可选） | https://dashscope.aliyun.com/ |
 
 ### 2.6 第五步：编译构建
@@ -304,8 +305,8 @@ spring:
     password: ${DB_PASSWORD}
   servlet:
     multipart:
-      max-file-size: 200MB
-      max-request-size: 200MB
+      max-file-size: 2GB
+      max-request-size: 2GB
 
 jwt:
   secret: ${JWT_SECRET}
@@ -378,16 +379,19 @@ logging:
 
 ### 5.1 数据表总览
 
-系统共 12 张数据表，按业务域划分：
+系统共 15 张数据表，按业务域划分：
 
-**用户与权限（4 张表）：**
+**用户与权限（6 张表）：**
 
 | 表名 | 说明 |
 |------|------|
 | user | 用户表 |
+| user_resume | 用户可复用、不可变的简历版本表 |
 | role | 角色表（admin、user） |
+| permission | 权限码表 |
 | user_role | 用户角色关联表 |
 | role_permission | 角色权限关联表 |
+| permission_audit_log | 权限及高风险操作审计表 |
 
 **面试业务（5 张表）：**
 
@@ -397,13 +401,13 @@ logging:
 | interview_question | 面试问题表 |
 | interview_note | 面试笔记表 |
 | interview_favorite | 问题收藏表 |
-| interview_share | 面试分享表 |
+| question_standard_cache | 标准答案与评分量表缓存表 |
 
 **面经与评论（2 张表）：**
 
 | 表名 | 说明 |
 |------|------|
-| interview_share | 面试分享表（含面经公开标识） |
+| interview_experience | 每场面试唯一的公开面经发布记录 |
 | interview_comment | 面经评论表 |
 
 **AI 配置（1 张表）：**
@@ -417,15 +421,16 @@ logging:
 ```
 user (用户)
   │ 1:N
-  ├── interview (面试记录)
+  ├── user_resume (不可变简历版本)
+  ├── interview (面试记录，绑定简历版本)
   │     │ 1:N
   │     ├── interview_question (面试问题)
-  │     │ 1:1
-  │     ├── interview_note (面试笔记)
+  │     │ 1:N
+  │     ├── interview_note (一条总笔记及各问题笔记)
   │     │ 1:N
   │     ├── interview_favorite (问题收藏)
-  │     │ 1:N
-  │     └── interview_share (面试分享/面经)
+  │     │ 1:1
+  │     └── interview_experience (公开面经)
   │           │ 1:N
   │           └── interview_comment (面经评论)
   │
@@ -438,6 +443,7 @@ user (用户)
                     └── permission (权限)
 
 ai_config (AI模型配置 - 独立表)
+question_standard_cache (按通用/个人作用域隔离的答案缓存)
 ```
 
 ### 5.3 关键字段说明
@@ -467,7 +473,7 @@ ai_config (AI模型配置 - 独立表)
 ### 6.1 面试上传与异步处理流程
 
 ```
-前端上传: audioFile + resumeFile + jdText + 公司/职位信息
+前端上传: audioFile + resumeId + jdText + 公司/职位信息
     │
     ▼
 InterviewController.upload()
@@ -795,7 +801,6 @@ AiClientConfig (@Bean 初始化)
     │                  └── Spring AI DeepSeekChatModel
     ├── "xiaomi"   -> SpringAiOpenAiCompatibleLlmClient
     │                  └── Spring AI OpenAiChatModel
-    ├── "whisper"  -> SpringAiWhisperAsrClient
     │                  └── Spring AI OpenAiAudioTranscriptionModel
     └── "funasr"   -> SpringAiFunAsrClient
                        └── 自定义 Spring AI FunAsrTranscriptionModel
@@ -816,7 +821,6 @@ LlmClient.call() / AsrClient.transcribe()
 | AiClientConfig | `ai-ai/.../config/AiClientConfig.java` | 客户端注册配置 |
 | SpringAiDeepSeekLlmClient | `ai-ai/.../client/SpringAiDeepSeekLlmClient.java` | Spring AI DeepSeek 文本模型适配器（含重试） |
 | SpringAiOpenAiCompatibleLlmClient | `ai-ai/.../client/SpringAiOpenAiCompatibleLlmClient.java` | Spring AI OpenAI 兼容文本模型适配器，用于 MiMo 等模型 |
-| SpringAiWhisperAsrClient | `ai-ai/.../client/SpringAiWhisperAsrClient.java` | Spring AI OpenAI 音频转写适配器 |
 | SpringAiFunAsrClient | `ai-ai/.../client/SpringAiFunAsrClient.java` | 业务 ASR 契约到 Spring AI 的适配器 |
 | FunAsrTranscriptionModel | `ai-ai/.../model/funasr/FunAsrTranscriptionModel.java` | Spring AI 自定义 FunASR 模型，保留句子时间戳与说话人元数据 |
 | AudioPreprocessor | `ai-ai/.../audio/AudioPreprocessor.java` | 音频预处理器 |
@@ -998,7 +1002,13 @@ VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliy
 | GET | /interviews/{id} | 面试详情 | 是 |
 | DELETE | /interviews/{id} | 删除面试 | 是 |
 | GET | /interviews/{id}/status | 处理进度 | 是 |
-| POST | /interviews/{id}/retry | 重新处理（任意状态） | 是 |
+| POST | /interviews/{id}/retry | 从失败或取消阶段继续处理 | 是 |
+| POST | /interviews/{id}/cancel | 取消处理中任务 | 是 |
+| POST | /interviews/{id}/reanalyze | 对已完成面试重新识别问答并评分 | 是 |
+| PUT | /interviews/{id}/title | 修改标题 | 是 |
+| GET | /interviews/recycle-bin | 查看 7 天回收站 | 是 |
+| POST | /interviews/{id}/restore | 恢复回收站面试 | 是 |
+| PUT | /interviews/{id}/speaker-roles | 校正说话人角色并重评 | 是 |
 
 ### 9.3 笔记模块
 
@@ -1017,20 +1027,18 @@ VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliy
 | DELETE | /favorites/{id} | 取消收藏 |
 | GET | /favorites | 收藏列表（分页） |
 
-### 9.5 分享与面经模块
+### 9.5 面经发布与评论模块
 
 | 方法 | 路径 | 说明 | 认证 |
 |------|------|------|------|
-| POST | /interviews/{id}/share | 生成分享链接/发布面经 | 是 |
-| GET | /interviews/{id}/shares | 分享记录列表 | 是 |
-| DELETE | /shares/{token} | 撤销分享 | 是 |
-| PUT | /shares/{token}/public | 切换公开状态 | 是 |
-| GET | /share/{token} | 访问分享页面 | 否 |
+| POST/GET/PUT/DELETE | /interviews/{id}/publication | 发布、读取、修改或撤回本人公开面经 | 是 |
+| GET | /experiences/{id} | 查看可见公开面经 | 否 |
 | GET | /experiences | 面经广场列表 | 否 |
-| GET | /experiences/{token} | 面经详情 | 否 |
-| GET | /experiences/{token}/comments | 评论列表 | 否 |
-| POST | /experiences/{token}/comments | 发表评论 | 是 |
+| GET | /experiences/{id}/comments | 评论列表 | 否 |
+| POST | /experiences/{id}/comments | 发表评论 | 是 |
 | DELETE | /comments/{id} | 删除评论 | 是 |
+
+系统不再生成私密分享链接或 Token。每场已完成面试最多对应一篇数字 ID 面经；用户可撤回后重新发布，管理员下架后仅管理员能够解除限制。
 
 ### 9.6 管理模块 (ai-admin)
 
@@ -1045,7 +1053,7 @@ VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliy
 | GET | /admin/stats/overview | 系统统计 | system:stats:read |
 | GET | /admin/interviews | 所有面试数据 | interview:read_all |
 | GET | /admin/experiences | 所有面经 | experience:read_all |
-| PUT | /admin/experiences/{token}/status | 下架/恢复面经 | experience:manage |
+| PUT | /admin/experiences/{id}/status | 下架/恢复面经 | experience:manage |
 | GET | /admin/comments | 所有评论 | comment:read_all |
 | DELETE | /admin/comments/{id} | 删除评论 | comment:manage |
 | GET | /admin/audit-logs | 权限与高风险操作审计日志 | audit:read |
@@ -1284,7 +1292,6 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 | ai-ai/.../client/SpringAiDeepSeekLlmClient.java | Spring AI DeepSeek 客户端（含重试） |
 | ai-ai/.../client/SpringAiOpenAiCompatibleLlmClient.java | Spring AI MiMo/OpenAI 兼容客户端 |
 | ai-ai/.../client/SpringAiFunAsrClient.java | FunASR 业务适配器 |
-| ai-ai/.../client/SpringAiWhisperAsrClient.java | Spring AI Whisper 适配器 |
 | ai-ai/.../model/funasr/FunAsrTranscriptionModel.java | 自定义 Spring AI FunASR 转写模型 |
 | ai-ai/.../audio/AudioPreprocessor.java | 音频预处理器 |
 | ai-ai/.../audio/FfmpegResolver.java | FFmpeg 路径探测器 |

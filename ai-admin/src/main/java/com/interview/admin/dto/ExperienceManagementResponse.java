@@ -28,15 +28,13 @@ public class ExperienceManagementResponse {
     /** 用户名（关联查询） */
     private String username;
 
-    /** 分享 Token */
-    private String shareToken;
-
-    /** 是否公开：0=私有, 1=公开 */
-    private Integer isPublic;
+    private String publishStatus;
+    private String moderationStatus;
+    private String summaryMarkdown;
 
     /** 浏览量 */
     private Integer viewCount;
 
     /** 创建时间 */
-    private LocalDateTime createdAt;
+    private LocalDateTime publishedAt;
 }

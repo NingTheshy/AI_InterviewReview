@@ -21,6 +21,13 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 /**
  * 评分结果解析器
@@ -50,7 +57,17 @@ public class ScoreResultParser {
      */
     @Transactional
     public int parseAndSave(Interview interview, String scoreResultJson) {
+        return parseAndSave(interview, scoreResultJson, interview.getProcessingToken());
+    }
+
+    /** 在同一事务内校验任务令牌并原子替换当前评分结果。 */
+    @Transactional
+    public int parseAndSave(Interview interview, String scoreResultJson, String processingToken) {
         try {
+            Interview locked = interviewMapper.selectForUpdate(interview.getId());
+            if (locked == null || processingToken == null || !processingToken.equals(locked.getProcessingToken())) {
+                throw new IllegalStateException("面试任务令牌已失效");
+            }
             JsonNode root = objectMapper.readTree(scoreResultJson);
             JsonNode questionsNode = root.path("questions");
             int scorableQuestionCount = root.has("scorableQuestionCount")
@@ -87,9 +104,11 @@ public class ScoreResultParser {
             applySpeakerRoles(interview, questionsNode);
             interviewMapper.updateById(interview);
 
-            LambdaQueryWrapper<InterviewQuestion> deleteWrapper = new LambdaQueryWrapper<>();
-            deleteWrapper.eq(InterviewQuestion::getInterviewId, interview.getId());
-            questionMapper.delete(deleteWrapper);
+            List<InterviewQuestion> oldQuestions = questionMapper.selectList(new LambdaQueryWrapper<InterviewQuestion>()
+                    .eq(InterviewQuestion::getInterviewId, interview.getId())
+                    .and(w -> w.eq(InterviewQuestion::getIsActive, 1).or().isNull(InterviewQuestion::getIsActive))
+                    .orderByAsc(InterviewQuestion::getQuestionIndex));
+            Set<Long> retainedIds = new HashSet<>();
 
             if (questionsNode.isArray()) {
                 for (JsonNode qNode : questionsNode) {
@@ -115,6 +134,9 @@ public class ScoreResultParser {
                     question.setImprovementTip(getText(qNode, "improvementTip"));
                     question.setReferenceAnswer(getText(qNode, "referenceAnswer"));
                     question.setAnswerDifference(getText(qNode, "answerDifference"));
+                    if (question.getAnswerDifference() == null || question.getAnswerDifference().isBlank()) {
+                        question.setAnswerDifference(deriveAnswerDifference(qNode));
+                    }
                     JsonNode rubricDetail = qNode.path("rubricDetail");
                     if (!rubricDetail.isMissingNode() && !rubricDetail.isNull()) {
                         if (!rubricDetail.isObject()) {
@@ -122,7 +144,26 @@ public class ScoreResultParser {
                         }
                         question.setRubricDetail(objectMapper.writeValueAsString(rubricDetail));
                     }
-                    questionMapper.insert(question);
+                    String fingerprint = fingerprint(question);
+                    question.setQuestionFingerprint(fingerprint);
+                    question.setIsActive(1);
+                    InterviewQuestion matched = findMatch(oldQuestions, question, retainedIds);
+                    if (matched != null) {
+                        question.setId(matched.getId());
+                        question.setCreatedAt(matched.getCreatedAt());
+                        questionMapper.updateById(question);
+                        retainedIds.add(matched.getId());
+                    } else {
+                        questionMapper.insert(question);
+                        retainedIds.add(question.getId());
+                    }
+                }
+            }
+            for (InterviewQuestion old : oldQuestions) {
+                if (!retainedIds.contains(old.getId())) {
+                    old.setIsActive(0);
+                    old.setArchivedAt(LocalDateTime.now());
+                    questionMapper.updateById(old);
                 }
             }
             log.info("评分结果解析完成: interviewId={}, 问题数={}",
@@ -133,6 +174,62 @@ public class ScoreResultParser {
             throw new BusinessException(ErrorCode.PROCESSING_FAILED.getCode(),
                     "评分结果解析失败: " + e.getMessage());
         }
+    }
+
+    /** 重评成功时在同一事务中替换评分并完成任务，避免半成品覆盖旧结果。 */
+    @Transactional
+    public int parseAndCompleteReanalysis(Interview interview, String scoreResultJson, String processingToken) {
+        int count = parseAndSave(interview, scoreResultJson, processingToken);
+        if (count <= 0) throw new BusinessException(ErrorCode.NO_SCORABLE_QUESTIONS.getCode(), ErrorCode.NO_SCORABLE_QUESTIONS.getMessage());
+        if (interviewMapper.completeReanalysis(interview.getId(), processingToken) == 0) {
+            throw new IllegalStateException("面试任务令牌已失效，拒绝提交重评结果");
+        }
+        return count;
+    }
+
+    private InterviewQuestion findMatch(List<InterviewQuestion> oldQuestions, InterviewQuestion current, Set<Long> used) {
+        return oldQuestions.stream().filter(old -> !used.contains(old.getId()))
+                .filter(old -> fingerprint(old).equals(current.getQuestionFingerprint())
+                        || (normalize(old.getQuestionText()).equals(normalize(current.getQuestionText()))
+                        && rangesOverlap(old, current)))
+                .min(Comparator.comparingInt(old -> distance(old.getStartTime(), current.getStartTime())))
+                .orElse(null);
+    }
+
+    private boolean rangesOverlap(InterviewQuestion left, InterviewQuestion right) {
+        if (left.getStartTime() == null || left.getEndTime() == null || right.getStartTime() == null || right.getEndTime() == null) return false;
+        return left.getStartTime() <= right.getEndTime() + 5 && right.getStartTime() <= left.getEndTime() + 5;
+    }
+
+    private int distance(Integer a, Integer b) { return a == null || b == null ? Integer.MAX_VALUE : Math.abs(a - b); }
+
+    private String fingerprint(InterviewQuestion question) {
+        int startBucket = question.getStartTime() == null ? -1 : question.getStartTime() / 5;
+        int endBucket = question.getEndTime() == null ? -1 : question.getEndTime() / 5;
+        String source = normalize(question.getQuestionText()) + '|' + startBucket + '|' + endBucket;
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException("无法生成问题指纹", e);
+        }
+    }
+
+    private String normalize(String text) {
+        return text == null ? "" : text.toLowerCase().replaceAll("[\\p{P}\\p{Z}\\s]+", "").trim();
+    }
+
+    private String deriveAnswerDifference(JsonNode question) {
+        List<String> parts = new ArrayList<>();
+        appendTextArray(parts, question.path("missingPoints"), "缺失：");
+        appendTextArray(parts, question.path("incorrectPoints"), "错误：");
+        return parts.isEmpty() ? "未提供可验证的答案差距" : String.join("；", parts);
+    }
+
+    private void appendTextArray(List<String> target, JsonNode values, String prefix) {
+        if (!values.isArray()) return;
+        List<String> items = new ArrayList<>();
+        values.forEach(value -> { if (value.isTextual() && !value.asText().isBlank()) items.add(value.asText().trim()); });
+        if (!items.isEmpty()) target.add(prefix + String.join("、", items));
     }
 
     /** 兼容改造前没有可计分标记的历史评分结果；旧问题默认都参与评分。 */

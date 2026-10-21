@@ -59,11 +59,8 @@ public enum ErrorCode {
     PROCESSING_FAILED(3003, "面试处理失败"),
     AI_CONFIG_NOT_TESTED(3004, "AI配置尚未通过连接测试"),
 
-    // 收藏/分享模块 4xxx
-    FAVORITE_LIMIT(4001, "收藏数已达上限"),
+    // 收藏模块 4xxx
     FAVORITE_EXISTS(4002, "该问题已收藏"),
-    SHARE_EXPIRED(4003, "分享链接已过期"),
-    SHARE_NOT_FOUND(4004, "分享链接不存在"),
 
     // 管理员模块 5xxx
     ADMIN_REQUIRED(5001, "无权限访问，需要管理员权限"),

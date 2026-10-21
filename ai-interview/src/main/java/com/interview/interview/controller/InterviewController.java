@@ -7,6 +7,7 @@ import com.interview.interview.dto.InterviewDetailResponse;
 import com.interview.interview.dto.InterviewListResponse;
 import com.interview.interview.dto.InterviewStatusResponse;
 import com.interview.interview.dto.SpeakerRoleMappingRequest;
+import com.interview.interview.dto.InterviewTitleRequest;
 import com.interview.interview.service.InterviewService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,10 +34,9 @@ public class InterviewController {
     private final InterviewService interviewService;
 
     /**
-     * 上传面试（音频 + 简历 + JD）
+     * 上传面试（音频 + 已解析简历 + JD）
      *
      * @param audioFile     音频文件
-     * @param resumeFile    简历文件
      * @param jdText        职位描述文本
      * @param title         面试标题
      * @param companyName   公司名称
@@ -50,20 +50,16 @@ public class InterviewController {
     @PreAuthorize("hasAuthority('interview:create')")
     public Result<Long> upload(
             @RequestParam("audioFile") MultipartFile audioFile,
-            @RequestParam(value = "resumeId", required = false) Long resumeId,
-            @RequestParam(value = "resumeFile", required = false) MultipartFile resumeFile,
+            @RequestParam("resumeId") Long resumeId,
             @RequestParam("jdText") @NotBlank(message = "岗位JD不能为空") String jdText,
             @RequestParam(value = "title", required = false) String title,
             @RequestParam(value = "companyName", required = false) String companyName,
-            @RequestParam(value = "positionTitle", required = false) String positionTitle,
+            @RequestParam("positionTitle") @NotBlank(message = "岗位名称不能为空") String positionTitle,
             @RequestParam(value = "industry", required = false) String industry,
-            @RequestParam(value = "interviewType", required = false) String interviewType) {
+            @RequestParam("interviewType") @NotBlank(message = "面试类型不能为空") String interviewType) {
         Long userId = SecurityUtils.getCurrentUserId();
-        Long id = resumeId == null
-                ? interviewService.upload(userId, audioFile, resumeFile, jdText,
-                        title, companyName, positionTitle, industry, interviewType)
-                : interviewService.upload(userId, audioFile, resumeId, resumeFile, jdText,
-                        title, companyName, positionTitle, industry, interviewType);
+        Long id = interviewService.upload(userId, audioFile, resumeId, jdText,
+                title, companyName, positionTitle, industry, interviewType);
         return Result.success(id);
     }
 
@@ -88,10 +84,12 @@ public class InterviewController {
             @RequestParam(required = false) String positionTitle,
             @RequestParam(required = false) String industry,
             @RequestParam(required = false) String interviewType,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer status,
             @RequestParam(defaultValue = "createdAt") String sortBy) {
         Long userId = SecurityUtils.getCurrentUserId();
         return Result.success(interviewService.list(userId, page, size,
-                companyName, positionTitle, industry, interviewType, sortBy));
+                companyName, positionTitle, industry, interviewType, keyword, status, sortBy));
     }
 
     /**
@@ -149,6 +147,30 @@ public class InterviewController {
     public Result<Void> retry(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         interviewService.retry(id, userId);
+        return Result.success();
+    }
+
+    @Operation(summary = "取消正在处理的面试")
+    @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasAuthority('interview:manage')")
+    public Result<Void> cancel(@PathVariable Long id) {
+        interviewService.cancel(id, SecurityUtils.getCurrentUserId());
+        return Result.success();
+    }
+
+    @Operation(summary = "重新分析已完成面试")
+    @PostMapping("/{id}/reanalyze")
+    @PreAuthorize("hasAuthority('interview:manage')")
+    public Result<Void> reanalyze(@PathVariable Long id) {
+        interviewService.reanalyze(id, SecurityUtils.getCurrentUserId());
+        return Result.success();
+    }
+
+    @Operation(summary = "修改面试标题")
+    @PutMapping("/{id}/title")
+    @PreAuthorize("hasAuthority('interview:manage')")
+    public Result<Void> updateTitle(@PathVariable Long id, @Valid @RequestBody InterviewTitleRequest request) {
+        interviewService.updateTitle(id, SecurityUtils.getCurrentUserId(), request.getTitle());
         return Result.success();
     }
 

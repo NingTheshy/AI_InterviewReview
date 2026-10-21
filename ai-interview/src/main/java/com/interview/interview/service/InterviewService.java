@@ -20,13 +20,13 @@ public interface InterviewService {
     /**
      * 上传面试记录
      * <p>
-     * 保存音频文件、简历文件和 JD 信息，创建面试记录，
+     * 校验独立上传且解析成功的简历，保存音频和 JD 信息，创建面试记录，
      * 并触发异步 AI 处理流程。
      * </p>
      *
      * @param userId        用户 ID
      * @param audioFile     音频文件（必填）
-     * @param resumeFile    简历文件（可选）
+     * @param resumeId      当前用户已解析成功的简历 ID（必填）
      * @param jdText        职位描述文本（必填）
      * @param title         面试标题
      * @param companyName   公司名称
@@ -35,12 +35,7 @@ public interface InterviewService {
      * @param interviewType 面试类型（coding/behavioral/system_design/comprehensive）
      * @return 新建面试记录的 ID
      */
-    Long upload(Long userId, MultipartFile audioFile, MultipartFile resumeFile,
-                String jdText, String title, String companyName,
-                String positionTitle, String industry, String interviewType);
-
-    /** 使用历史简历或同时上传新简历创建面试；两者至少提供一个。 */
-    Long upload(Long userId, MultipartFile audioFile, Long resumeId, MultipartFile resumeFile,
+    Long upload(Long userId, MultipartFile audioFile, Long resumeId,
                 String jdText, String title, String companyName,
                 String positionTitle, String industry, String interviewType);
 
@@ -59,7 +54,12 @@ public interface InterviewService {
     PageResult<InterviewListResponse> list(Long userId, int page, int size,
                                            String companyName, String positionTitle,
                                            String industry, String interviewType,
-                                           String sortBy);
+                                           String keyword, Integer status, String sortBy);
+
+    default PageResult<InterviewListResponse> list(Long userId, int page, int size,
+            String companyName, String positionTitle, String industry, String interviewType, String sortBy) {
+        return list(userId, page, size, companyName, positionTitle, industry, interviewType, null, null, sortBy);
+    }
 
     /**
      * 获取面试详情（仅限记录所有者）
@@ -111,6 +111,15 @@ public interface InterviewService {
      * @throws com.interview.common.exception.BusinessException 面试不存在、无权限或正在处理中
      */
     void retry(Long id, Long userId);
+
+    /** 取消处理中任务并保留已经落库的阶段产物。 */
+    void cancel(Long id, Long userId);
+
+    /** 已完成面试只重新执行问答识别和评分。 */
+    void reanalyze(Long id, Long userId);
+
+    /** 仅修改标题，其他创建上下文保持不可变。 */
+    void updateTitle(Long id, Long userId, String title);
 
     /** 查询当前用户七天内可恢复的面试。 */
     List<InterviewListResponse> recycleBin(Long userId);

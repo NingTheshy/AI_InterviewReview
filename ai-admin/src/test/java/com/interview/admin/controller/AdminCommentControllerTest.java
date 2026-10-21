@@ -67,7 +67,7 @@ class AdminCommentControllerTest {
         void listComments_Success() throws Exception {
             CommentManagementResponse comment = CommentManagementResponse.builder()
                     .id(1L)
-                    .shareId(10L)
+                    .experienceId(10L)
                     .userId(TEST_USER_ID)
                     .username("testuser")
                     .content("很好的面试分享！")

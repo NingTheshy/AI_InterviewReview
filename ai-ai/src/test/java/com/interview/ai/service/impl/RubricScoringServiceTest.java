@@ -86,7 +86,7 @@ class RubricScoringServiceTest {
         assertEquals("CANDIDATE", question.path("answerSpeaker").asText());
         assertEquals(1, question.path("startTime").asInt());
         assertEquals(8, question.path("endTime").asInt());
-        assertEquals("rubric-v1", question.path("rubricDetail").path("version").asText());
+        assertEquals("rubric-v2", question.path("rubricDetail").path("version").asText());
 
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
         verify(invoker, times(4)).invoke(any(), prompts.capture(), anyString(), isNull());
@@ -112,11 +112,14 @@ class RubricScoringServiceTest {
     void reusesSavedStandardWhenQuestionAndContextMatch() throws Exception {
         JsonNode original = json(standards(100)).get(0);
         ObjectNode savedDetail = mapper.createObjectNode();
-        savedDetail.put("version", "rubric-v1");
+        savedDetail.put("version", "rubric-v2");
         savedDetail.putObject("context")
                 .put("positionTitle", "Java 工程师")
+                .put("companyName", "未提供")
                 .put("industry", "互联网")
-                .put("companyTier", 2);
+                .put("companyTier", 2)
+                .put("questionType", "TECHNICAL")
+                .put("promptVersion", "rubric-v2");
         savedDetail.set("items", original.path("items"));
         ScoringService.SavedRubric saved = new ScoringService.SavedRubric(
                 "请解释缓存一致性。", "满分示范", savedDetail.toString());

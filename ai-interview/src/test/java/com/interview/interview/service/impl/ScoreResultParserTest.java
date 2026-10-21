@@ -15,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import java.util.Collections;
 
 @ExtendWith(MockitoExtension.class)
 class ScoreResultParserTest {
@@ -26,6 +28,9 @@ class ScoreResultParserTest {
     void storesRubricAsJsonAndComputesOverallScoreOnServer() {
         Interview interview = new Interview();
         interview.setId(7L);
+        interview.setProcessingToken("token-7");
+        when(interviewMapper.selectForUpdate(7L)).thenReturn(interview);
+        when(questionMapper.selectList(any())).thenReturn(Collections.emptyList());
         int scorableCount = new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
                 {"overallScore":0,"dimensionContent":80,"dimensionLogic":70,
                  "dimensionExpression":60,"dimensionProfessional":90,"dimensionCommunication":50,
@@ -46,6 +51,9 @@ class ScoreResultParserTest {
     void legacyResultKeepsRubricNull() {
         Interview interview = new Interview();
         interview.setId(8L);
+        interview.setProcessingToken("token-8");
+        when(interviewMapper.selectForUpdate(8L)).thenReturn(interview);
+        when(questionMapper.selectList(any())).thenReturn(Collections.emptyList());
         int scorableCount = new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
                 {"dimensionContent":70,"dimensionLogic":70,"dimensionExpression":70,
                  "dimensionProfessional":70,"dimensionCommunication":70,
@@ -62,6 +70,9 @@ class ScoreResultParserTest {
     void mapsSpeakerIdsToBusinessRolesAndStoresQuestionTimestamps() {
         Interview interview = new Interview();
         interview.setId(9L);
+        interview.setProcessingToken("token-9");
+        when(interviewMapper.selectForUpdate(9L)).thenReturn(interview);
+        when(questionMapper.selectList(any())).thenReturn(Collections.emptyList());
         interview.setTranscriptSegments("""
                 [{"text":"请介绍项目","speakerId":"0","speakerRole":"UNKNOWN","startTimeMs":100,"endTimeMs":900},
                  {"text":"我负责核心模块","speakerId":"1","speakerRole":"UNKNOWN","startTimeMs":1000,"endTimeMs":4100}]

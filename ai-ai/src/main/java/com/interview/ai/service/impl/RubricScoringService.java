@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -77,6 +78,13 @@ public class RubricScoringService {
     public String analyzeWithClient(LlmClient client, String transcript, String jdText, String resumeText,
                                     String positionTitle, String industry, Integer companyTier,
                                     List<ScoringService.SavedRubric> savedRubrics) {
+        return analyzeWithClient(client, transcript, jdText, resumeText, positionTitle, null, industry,
+                companyTier, savedRubrics);
+    }
+
+    public String analyzeWithClient(LlmClient client, String transcript, String jdText, String resumeText,
+                                    String positionTitle, String companyName, String industry, Integer companyTier,
+                                    List<ScoringService.SavedRubric> savedRubrics) {
         if (transcript == null || transcript.isBlank()) {
             throw failure("面试转录为空，无法评分");
         }
@@ -100,14 +108,14 @@ public class RubricScoringService {
             }
             if (scoringBatch.isEmpty()) continue;
             ArrayNode standards = resolveStandards(client, scoringBatch, jdText, resumeText,
-                    positionTitle, industry, tierName, companyTier, configId, savedRubrics);
+                    positionTitle, companyName, industry, tierName, companyTier, configId, savedRubrics);
             ArrayNode assessments = compareAnswers(client, scoringBatch, standards, configId);
             Map<Integer, JsonNode> standardByIndex = byQuestionIndex(standards);
             Map<Integer, JsonNode> assessmentByIndex = byQuestionIndex(assessments);
             for (JsonNode question : scoringBatch) {
                 int index = question.path("questionIndex").asInt();
                 scoredQuestions.add(scoreQuestion(question, standardByIndex.get(index),
-                        assessmentByIndex.get(index), positionTitle, industry, companyTier));
+                        assessmentByIndex.get(index), positionTitle, companyName, industry, companyTier, resumeText));
             }
         }
 
@@ -139,23 +147,29 @@ public class RubricScoringService {
      * 高门槛面试。</p>
      */
     private ArrayNode resolveStandards(LlmClient client, ArrayNode questions, String jdText,
-                                       String resumeText, String positionTitle, String industry,
+                                       String resumeText, String positionTitle, String companyName, String industry,
                                        String tierName, Integer companyTier, Long configId,
                                        List<ScoringService.SavedRubric> savedRubrics) {
-        ArrayNode missing = mapper.createArrayNode();
+        ArrayNode missingGeneric = mapper.createArrayNode();
+        ArrayNode missingPersonal = mapper.createArrayNode();
         Map<Integer, JsonNode> standardsByIndex = new HashMap<>();
         for (JsonNode question : questions) {
-            JsonNode reused = findReusableStandard(question, positionTitle, industry,
-                    companyTier, savedRubrics);
+            JsonNode reused = findReusableStandard(question, positionTitle, companyName, industry,
+                    companyTier, resumeText, savedRubrics);
             if (reused == null) {
-                missing.add(question);
+                (isPersonal(question) ? missingPersonal : missingGeneric).add(question);
             } else {
                 standardsByIndex.put(question.path("questionIndex").asInt(), reused);
             }
         }
-        if (!missing.isEmpty()) {
-            ArrayNode generated = generateStandards(client, missing, jdText, resumeText,
-                    positionTitle, industry, tierName, configId);
+        if (!missingGeneric.isEmpty()) {
+            ArrayNode generated = generateStandards(client, missingGeneric, jdText, null,
+                    positionTitle, companyName, industry, tierName, configId, false);
+            standardsByIndex.putAll(byQuestionIndex(generated));
+        }
+        if (!missingPersonal.isEmpty()) {
+            ArrayNode generated = generateStandards(client, missingPersonal, jdText, resumeText,
+                    positionTitle, companyName, industry, tierName, configId, true);
             standardsByIndex.putAll(byQuestionIndex(generated));
         }
         ArrayNode ordered = mapper.createArrayNode();
@@ -166,8 +180,9 @@ public class RubricScoringService {
     }
 
     /** 校验历史量表的版本和上下文后重建为当前批次可用的标准对象。 */
-    private JsonNode findReusableStandard(JsonNode question, String positionTitle, String industry,
-                                          Integer companyTier, List<ScoringService.SavedRubric> savedRubrics) {
+    private JsonNode findReusableStandard(JsonNode question, String positionTitle, String companyName, String industry,
+                                          Integer companyTier, String resumeText,
+                                          List<ScoringService.SavedRubric> savedRubrics) {
         if (savedRubrics == null) return null;
         for (ScoringService.SavedRubric saved : savedRubrics) {
             if (!normalizedQuestion(question.path("questionText").asText())
@@ -177,10 +192,13 @@ public class RubricScoringService {
             try {
                 JsonNode detail = mapper.readTree(saved.rubricDetail());
                 JsonNode context = detail.path("context");
-                if (!"rubric-v1".equals(detail.path("version").asText())
+                if (!"rubric-v2".equals(detail.path("version").asText())
                         || !Objects.equals(safe(positionTitle), context.path("positionTitle").asText())
+                        || !Objects.equals(safe(companyName), context.path("companyName").asText())
                         || !Objects.equals(safe(industry), context.path("industry").asText())
-                        || (companyTier != null && context.path("companyTier").asInt(-1) != companyTier)) {
+                        || (companyTier != null && context.path("companyTier").asInt(-1) != companyTier)
+                        || !Objects.equals(question.path("questionType").asText("OBJECTIVE"), context.path("questionType").asText())
+                        || (isPersonal(question) && !Objects.equals(digest(resumeText), context.path("resumeDigest").asText()))) {
                     continue;
                 }
                 ObjectNode standard = mapper.createObjectNode();
@@ -210,6 +228,11 @@ public class RubricScoringService {
         return text == null ? "" : text.replaceAll("\\s+", "").trim();
     }
 
+    private boolean isPersonal(JsonNode question) {
+        return Set.of("PERSONAL", "PROJECT", "BEHAVIORAL")
+                .contains(question.path("questionType").asText("OBJECTIVE"));
+    }
+
     /**
      * 按自然边界切分长转写并识别问答对。
      *
@@ -217,21 +240,10 @@ public class RubricScoringService {
      * 会拒绝不属于当前分块的元数据，防止模型猜测角色或时间。</p>
      */
     private ArrayNode identifyQuestions(LlmClient client, String transcript, Long configId) {
-        ArrayNode questions = mapper.createArrayNode();
-        int start = 0;
-        while (start < transcript.length()) {
-            int end = Math.min(start + TRANSCRIPT_CHUNK_SIZE, transcript.length());
-            if (end < transcript.length()) {
-                int boundary = -1;
-                for (int i = end - 1; i >= Math.max(start + 1, end - 2000); i--) {
-                    if ("。？！?!；\n".indexOf(transcript.charAt(i)) >= 0) {
-                        boundary = i + 1;
-                        break;
-                    }
-                }
-                if (boundary > start) end = boundary;
-            }
-            String chunk = transcript.substring(start, end);
+        List<String> sentenceLines = transcript.lines().filter(line -> !line.isBlank()).toList();
+        List<String> chunks = sentenceChunks(sentenceLines);
+        List<JsonNode> unique = new ArrayList<>();
+        for (String chunk : chunks) {
             String prompt = "请从下面的面试转录中提取真实的问答对。保留原文，不要补写问题或回答。"
                     + "每句话前的 startTimeMs、endTimeMs、speakerId 和 speakerRole 均来自 ASR，必须原样引用。"
                     + "遇到段首或段尾不完整的问答，尽量保留可确认的部分。\n\n" + chunk;
@@ -246,30 +258,59 @@ public class RubricScoringService {
                     """;
             JsonNode extracted = invokeValidated(client, prompt, system, configId,
                     node -> validateExtraction(node, chunk));
-            for (JsonNode question : extracted) {
-                ObjectNode item = mapper.createObjectNode();
-                item.put("questionIndex", questions.size() + 1);
-                item.put("questionText", question.path("questionText").asText());
-                item.put("answerText", question.path("answerText").asText());
-                item.put("confidence", question.path("confidence").asText());
-                item.put("questionType", question.path("questionType").asText("OBJECTIVE"));
-                copyText(question, item, "questionSpeakerId");
-                copyText(question, item, "answerSpeakerId");
-                copyLong(question, item, "questionStartTimeMs");
-                copyLong(question, item, "answerEndTimeMs");
-                questions.add(item);
-            }
-            start = end;
+            extracted.forEach(question -> { if (!isDuplicate(unique, question)) unique.add(question.deepCopy()); });
+        }
+        ArrayNode questions = mapper.createArrayNode();
+        for (JsonNode question : unique) {
+            ObjectNode item = mapper.createObjectNode();
+            item.put("questionIndex", questions.size() + 1);
+            item.put("questionText", question.path("questionText").asText());
+            item.put("answerText", question.path("answerText").asText());
+            item.put("confidence", question.path("confidence").asText());
+            item.put("questionType", question.path("questionType").asText("OBJECTIVE"));
+            copyText(question, item, "questionSpeakerId"); copyText(question, item, "answerSpeakerId");
+            copyLong(question, item, "questionStartTimeMs"); copyLong(question, item, "answerEndTimeMs");
+            questions.add(item);
         }
         if (questions.isEmpty()) throw failure("未能从转录中识别面试问答");
         log.info("面试转录识别出 {} 个问答对", questions.size());
         return questions;
     }
 
+    private List<String> sentenceChunks(List<String> lines) {
+        if (lines.isEmpty()) return List.of();
+        List<String> chunks = new ArrayList<>();
+        int start = 0;
+        while (start < lines.size()) {
+            StringBuilder chunk = new StringBuilder();
+            int end = start;
+            while (end < lines.size() && (chunk.length() == 0 || chunk.length() + lines.get(end).length() + 1 <= TRANSCRIPT_CHUNK_SIZE)) {
+                if (chunk.length() > 0) chunk.append('\n');
+                chunk.append(lines.get(end++));
+            }
+            chunks.add(chunk.toString());
+            if (end >= lines.size()) break;
+            start = Math.max(start + 1, end - 4);
+        }
+        return chunks;
+    }
+
+    private boolean isDuplicate(List<JsonNode> existing, JsonNode candidate) {
+        String normalized = normalizedQuestion(candidate.path("questionText").asText());
+        long start = candidate.path("questionStartTimeMs").asLong(-1);
+        long end = candidate.path("answerEndTimeMs").asLong(-1);
+        return existing.stream().anyMatch(old -> normalized.equals(normalizedQuestion(old.path("questionText").asText()))
+                && overlaps(start, end, old.path("questionStartTimeMs").asLong(-1), old.path("answerEndTimeMs").asLong(-1)));
+    }
+
+    private boolean overlaps(long aStart, long aEnd, long bStart, long bEnd) {
+        return aStart >= 0 && bStart >= 0 && aStart <= bEnd + 5000 && bStart <= aEnd + 5000;
+    }
+
     /** 为当前批次生成候选人回答应达到的满分标准和可计分条目。 */
     private ArrayNode generateStandards(LlmClient client, ArrayNode questions, String jdText,
-                                        String resumeText, String positionTitle, String industry,
-                                        String tierName, Long configId) {
+                                        String resumeText, String positionTitle, String companyName, String industry,
+                                        String tierName, Long configId, boolean includeResume) {
         ArrayNode input = mapper.createArrayNode();
         for (JsonNode question : questions) {
             input.add(mapper.createObjectNode()
@@ -277,9 +318,9 @@ public class RubricScoringService {
                     .put("questionText", question.path("questionText").asText())
                     .put("questionType", question.path("questionType").asText("OBJECTIVE")));
         }
-        String prompt = "题目：" + input + "\n岗位：" + safe(positionTitle) + "\n行业：" + safe(industry)
+        String prompt = "题目：" + input + "\n岗位：" + safe(positionTitle) + "\n公司：" + safe(companyName) + "\n行业：" + safe(industry)
                 + "\n企业等级：" + tierName + "\nJD：" + safe(jdText)
-                + "\n候选人简历：" + safe(resumeText);
+                + (includeResume ? "\n候选人简历：" + safe(resumeText) : "");
         String system = """
                 你是资深面试官。根据题型、题目及岗位背景，为每题独立建立满分标准。
                 TECHNICAL 和 OBJECTIVE 题不得使用候选人简历改变客观结论；PERSONAL、PROJECT、BEHAVIORAL
@@ -361,7 +402,8 @@ public class RubricScoringService {
      * 解释、可复算。</p>
      */
     private ObjectNode scoreQuestion(JsonNode question, JsonNode standard, JsonNode assessment,
-                                     String positionTitle, String industry, Integer companyTier) {
+                                     String positionTitle, String companyName, String industry, Integer companyTier,
+                                     String resumeText) {
         Map<String, JsonNode> assessedItems = new HashMap<>();
         assessment.path("items").forEach(item -> assessedItems.put(item.path("id").asText(), item));
         double totalWeight = 0;
@@ -405,11 +447,15 @@ public class RubricScoringService {
             dimensionScores.put(dimension.toLowerCase(), dimensionScore);
         }
         ObjectNode detail = mapper.createObjectNode();
-        detail.put("version", "rubric-v1");
+        detail.put("version", "rubric-v2");
         ObjectNode context = detail.putObject("context");
         context.put("positionTitle", safe(positionTitle));
+        context.put("companyName", safe(companyName));
         context.put("industry", safe(industry));
         if (companyTier != null) context.put("companyTier", companyTier);
+        context.put("questionType", question.path("questionType").asText("OBJECTIVE"));
+        if (isPersonal(question)) context.put("resumeDigest", digest(resumeText));
+        context.put("promptVersion", "rubric-v2");
         detail.put("confidence", question.path("confidence").asText());
         detail.set("items", detailItems);
         detail.set("dimensionScores", dimensionScores);
@@ -444,9 +490,32 @@ public class RubricScoringService {
         result.put("dimensionProfessional", dimensionScores.path("professional").asInt());
         result.put("referenceAnswer", standard.path("referenceAnswer").asText());
         result.put("improvementTip", assessment.path("improvementTip").asText());
-        result.put("answerDifference", assessment.path("improvementTip").asText());
+        result.put("answerDifference", answerDifference(assessment));
         result.set("rubricDetail", detail);
         return result;
+    }
+
+    private String answerDifference(JsonNode assessment) {
+        List<String> missing = new ArrayList<>();
+        List<String> incorrect = new ArrayList<>();
+        assessment.path("items").forEach(item -> {
+            item.path("missingPoints").forEach(value -> { if (value.isTextual() && !value.asText().isBlank()) missing.add(value.asText()); });
+            item.path("incorrectClaims").forEach(value -> { if (value.isTextual() && !value.asText().isBlank()) incorrect.add(value.asText()); });
+        });
+        List<String> parts = new ArrayList<>();
+        if (!missing.isEmpty()) parts.add("缺失：" + String.join("、", missing));
+        if (!incorrect.isEmpty()) parts.add("错误：" + String.join("、", incorrect));
+        return parts.isEmpty() ? "与满分标准无明显关键差距" : String.join("；", parts);
+    }
+
+    private String digest(String value) {
+        try {
+            byte[] bytes = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((value == null ? "" : value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(bytes);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /** 低置信度问答仅供用户核对，不生成分数或进入汇总。 */

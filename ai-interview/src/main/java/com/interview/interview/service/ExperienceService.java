@@ -3,6 +3,7 @@ package com.interview.interview.service;
 import com.interview.common.result.PageResult;
 import com.interview.interview.dto.ExperienceDetailResponse;
 import com.interview.interview.dto.ExperienceListResponse;
+import com.interview.interview.dto.ExperiencePublicationResponse;
 
 /**
  * 面经服务接口
@@ -43,5 +44,10 @@ public interface ExperienceService {
      * @return 面经详情
      * @throws com.interview.common.exception.BusinessException 面经不存在或已过期
      */
-    ExperienceDetailResponse getDetail(String token);
+    ExperienceDetailResponse getDetail(Long id);
+    ExperiencePublicationResponse publish(Long interviewId, Long userId, String summaryMarkdown);
+    ExperiencePublicationResponse getPublication(Long interviewId, Long userId);
+    ExperiencePublicationResponse updatePublication(Long interviewId, Long userId, String summaryMarkdown);
+    void withdraw(Long interviewId, Long userId);
+    void withdrawForInterview(Long interviewId);
 }

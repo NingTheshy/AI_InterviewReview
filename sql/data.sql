@@ -30,7 +30,7 @@ INSERT INTO `permission` (`permission_name`, `permission_label`) VALUES
 ('interview:manage', '管理本人面试复盘'),
 ('note:manage', '管理本人笔记'),
 ('favorite:manage', '管理本人收藏'),
-('share:manage', '管理本人分享'),
+('experience:publish', '发布和管理本人面经'),
 ('comment:manage_own', '发表和管理本人评论'),
 ('user:read', '查看用户'),
 ('user:status:update', '更新用户状态'),
@@ -57,7 +57,7 @@ SELECT r.`id`, p.`id`
 FROM `role` r
 JOIN `permission` p ON p.`permission_name` IN (
     'interview:create', 'interview:read', 'interview:manage', 'note:manage',
-    'favorite:manage', 'share:manage', 'comment:manage_own'
+    'favorite:manage', 'experience:publish', 'comment:manage_own'
 )
 WHERE r.`role_name` = 'user';
 

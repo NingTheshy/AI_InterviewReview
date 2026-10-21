@@ -73,10 +73,10 @@ class AdminExperienceControllerTest {
                     .interviewId(100L)
                     .userId(TEST_USER_ID)
                     .username("testuser")
-                    .shareToken("testtoken123")
-                    .isPublic(1)
+                    .publishStatus("PUBLISHED")
+                    .moderationStatus("NORMAL")
                     .viewCount(100)
-                    .createdAt(LocalDateTime.now())
+                    .publishedAt(LocalDateTime.now())
                     .build();
             when(adminService.listExperiences(anyInt(), anyInt()))
                     .thenReturn(new PageResult<>(List.of(experience), 1, 1, 10));
@@ -112,12 +112,12 @@ class AdminExperienceControllerTest {
         @Test
         @DisplayName("设置面经状态成功")
         void setExperienceStatus_Success() throws Exception {
-            doNothing().when(adminService).setExperienceStatus(anyString(), anyInt());
+            doNothing().when(adminService).setExperienceStatus(anyLong(), anyInt());
 
             ExperienceStatusRequest request = new ExperienceStatusRequest();
             request.setIsPublic(0);
 
-            mockMvc.perform(put("/admin/experiences/{token}/status", "testtoken123")
+            mockMvc.perform(put("/admin/experiences/{id}/status", 1L)
                             .contentType("application/json")
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
@@ -127,17 +127,17 @@ class AdminExperienceControllerTest {
         @Test
         @DisplayName("设置面经状态 - 分享不存在")
         void setExperienceStatus_NotFound() throws Exception {
-            doThrow(new BusinessException(4004, "分享链接不存在"))
-                    .when(adminService).setExperienceStatus(eq("nonexistent"), anyInt());
+            doThrow(new BusinessException(5003, "面经已下架或不存在"))
+                    .when(adminService).setExperienceStatus(eq(99L), anyInt());
 
             ExperienceStatusRequest request = new ExperienceStatusRequest();
             request.setIsPublic(0);
 
-            mockMvc.perform(put("/admin/experiences/{token}/status", "nonexistent")
+            mockMvc.perform(put("/admin/experiences/{id}/status", 99L)
                             .contentType("application/json")
                             .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isGone())
-                    .andExpect(jsonPath("$.code").value(4004));
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(5003));
         }
     }
 }

@@ -55,8 +55,8 @@ public class ExperienceController {
      * @return 面经详情
      */
     @Operation(summary = "面经详情（无需认证）")
-    @GetMapping("/{token}")
-    public Result<ExperienceDetailResponse> getDetail(@PathVariable String token) {
-        return Result.success(experienceService.getDetail(token));
+    @GetMapping("/{id}")
+    public Result<ExperienceDetailResponse> getDetail(@PathVariable Long id) {
+        return Result.success(experienceService.getDetail(id));
     }
 }

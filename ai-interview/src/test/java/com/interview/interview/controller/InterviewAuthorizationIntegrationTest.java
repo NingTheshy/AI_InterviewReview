@@ -79,6 +79,7 @@ class InterviewAuthorizationIntegrationTest {
         when(interviewService.list(org.mockito.ArgumentMatchers.eq(USER_ID), anyInt(), anyInt(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 1, 10));
     }
@@ -111,6 +112,7 @@ class InterviewAuthorizationIntegrationTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         verify(interviewService).list(org.mockito.ArgumentMatchers.eq(USER_ID), anyInt(), anyInt(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any());

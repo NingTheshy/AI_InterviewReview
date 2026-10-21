@@ -28,12 +28,36 @@ public interface InterviewMapper extends BaseMapper<Interview> {
     int heartbeat(@Param("id") Long id, @Param("token") String token,
                   @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
 
+    @Update("UPDATE interview SET status=1, processing_step=4, processing_token=NULL, lease_expires_at=NULL, " +
+            "heartbeat_at=NOW(), last_error_code=NULL, error_message=NULL WHERE id=#{id} AND processing_token=#{token} " +
+            "AND status=0 AND deleted=0")
+    int completeTask(@Param("id") Long id, @Param("token") String token);
+
+    @Update("UPDATE interview SET status=1, processing_step=4, reanalysis_status='COMPLETED', reanalysis_error=NULL, " +
+            "processing_token=NULL, lease_expires_at=NULL, heartbeat_at=NOW(), last_error_code=NULL, error_message=NULL " +
+            "WHERE id=#{id} AND processing_token=#{token} AND status=0 AND deleted=0")
+    int completeReanalysis(@Param("id") Long id, @Param("token") String token);
+
+    @Update("UPDATE interview SET status=#{fallbackStatus}, reanalysis_status='FAILED', reanalysis_error=#{message}, " +
+            "processing_token=NULL, lease_expires_at=NULL, heartbeat_at=NOW() WHERE id=#{id} " +
+            "AND processing_token=#{token} AND deleted=0")
+    int failReanalysis(@Param("id") Long id, @Param("token") String token,
+                       @Param("fallbackStatus") int fallbackStatus, @Param("message") String message);
+
+    @Update("UPDATE interview SET status=#{status}, processing_token=NULL, lease_expires_at=NULL, heartbeat_at=NOW(), " +
+            "last_error_code=#{errorCode}, error_message=#{message} WHERE id=#{id} AND processing_token=#{token} AND deleted=0")
+    int finishTaskWithError(@Param("id") Long id, @Param("token") String token, @Param("status") int status,
+                            @Param("errorCode") String errorCode, @Param("message") String message);
+
     @Select("SELECT * FROM interview WHERE status=0 AND deleted=0 AND " +
             "(lease_expires_at IS NULL OR lease_expires_at < NOW())")
     List<Interview> selectRecoverable();
 
     @Select("SELECT COUNT(*) FROM interview WHERE id=#{id} AND processing_token=#{token} AND deleted=0")
     int ownsTask(@Param("id") Long id, @Param("token") String token);
+
+    @Select("SELECT * FROM interview WHERE id=#{id} AND deleted=0 FOR UPDATE")
+    Interview selectForUpdate(@Param("id") Long id);
 
     @Select("SELECT * FROM interview WHERE id=#{id} AND deleted=1")
     Interview selectDeletedById(@Param("id") Long id);
@@ -62,16 +86,16 @@ public interface InterviewMapper extends BaseMapper<Interview> {
     @Delete("DELETE FROM interview_favorite WHERE interview_id=#{interviewId}")
     int physicallyDeleteFavorites(@Param("interviewId") Long interviewId);
 
-    @Delete("DELETE c FROM interview_comment c JOIN interview_share s ON c.share_id=s.id WHERE s.interview_id=#{interviewId}")
+    @Delete("DELETE c FROM interview_comment c JOIN interview_experience e ON c.experience_id=e.id WHERE e.interview_id=#{interviewId}")
     int physicallyDeleteComments(@Param("interviewId") Long interviewId);
 
-    @Delete("DELETE FROM interview_share WHERE interview_id=#{interviewId}")
+    @Delete("DELETE FROM interview_experience WHERE interview_id=#{interviewId}")
     int physicallyDeleteShares(@Param("interviewId") Long interviewId);
 
     @Update("UPDATE interview SET audio_file_path=NULL, audio_file_size=NULL, resume_file_path=NULL, resume_text=NULL, " +
             "jd_text=NULL, transcript_text=NULL, transcript_segments=NULL, overall_score=NULL, dimension_content=NULL, " +
             "dimension_logic=NULL, dimension_expression=NULL, dimension_professional=NULL, dimension_communication=NULL, " +
             "improvement_summary=NULL, strengths=NULL, weaknesses=NULL, asr_config_snapshot=NULL, llm_config_snapshot=NULL, " +
-            "purged_at=NOW() WHERE id=#{id} AND deleted=1")
+            "resume_id=NULL, purged_at=NOW() WHERE id=#{id} AND deleted=1")
     int markPurged(@Param("id") Long id);
 }

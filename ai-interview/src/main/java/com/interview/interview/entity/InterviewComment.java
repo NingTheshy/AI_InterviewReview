@@ -17,8 +17,8 @@ import lombok.EqualsAndHashCode;
 @TableName("interview_comment")
 public class InterviewComment extends BaseEntity {
 
-    /** 面经分享 ID，关联 interview_share 表 */
-    private Long shareId;
+    /** 公开面经 ID，关联 interview_experience 表 */
+    private Long experienceId;
 
     /** 评论者用户 ID，关联 user 表 */
     private Long userId;

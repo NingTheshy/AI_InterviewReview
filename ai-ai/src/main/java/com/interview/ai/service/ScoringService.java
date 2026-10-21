@@ -23,6 +23,13 @@ public interface ScoringService {
                                      String positionTitle, String industry, Integer companyTier,
                                      String encryptedSnapshot, List<SavedRubric> savedRubrics);
 
+    default String analyzeWithRubricSnapshot(String text, String jdText, String resumeText,
+            String positionTitle, String companyName, String industry, Integer companyTier,
+            String encryptedSnapshot, List<SavedRubric> savedRubrics) {
+        return analyzeWithRubricSnapshot(text, jdText, resumeText, positionTitle, industry,
+                companyTier, encryptedSnapshot, savedRubrics);
+    }
+
     /**
      * 单次评估：一次性返回所有问题的评分结果
      *

@@ -5,6 +5,8 @@ import com.interview.common.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 /**
  * 用户可复用的简历版本。
  *
@@ -29,4 +31,8 @@ public class UserResume extends BaseEntity {
     private String parsedText;
     private Integer parseStatus;
     private String parseError;
+    private String processingToken;
+    private LocalDateTime leaseExpiresAt;
+    private LocalDateTime heartbeatAt;
+    private Integer retryCount;
 }

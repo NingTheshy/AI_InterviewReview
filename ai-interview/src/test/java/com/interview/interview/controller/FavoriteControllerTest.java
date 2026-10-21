@@ -84,6 +84,7 @@ class FavoriteControllerTest {
         void addFavorite_AlreadyExists() throws Exception {
             FavoriteRequest request = new FavoriteRequest();
             request.setInterviewId(100L);
+            request.setQuestionId(10L);
             doThrow(new BusinessException(4002, "该问题已收藏"))
                     .when(favoriteService).addFavorite(anyLong(), anyLong(), any(), any());
 
@@ -130,7 +131,8 @@ class FavoriteControllerTest {
                     .build();
             PageResult<FavoriteResponse> pageResult = new PageResult<>(
                     List.of(favorite), 1, 1, 10);
-            when(favoriteService.list(anyLong(), anyInt(), anyInt())).thenReturn(pageResult);
+            when(favoriteService.list(anyLong(), anyInt(), anyInt(), isNull(), isNull(), isNull(), eq("createdAt")))
+                    .thenReturn(pageResult);
 
             mockMvc.perform(get("/favorites")
                             .param("page", "1")
@@ -144,7 +146,8 @@ class FavoriteControllerTest {
         void list_Empty() throws Exception {
             PageResult<FavoriteResponse> pageResult = new PageResult<>(
                     List.of(), 0, 1, 10);
-            when(favoriteService.list(anyLong(), anyInt(), anyInt())).thenReturn(pageResult);
+            when(favoriteService.list(anyLong(), anyInt(), anyInt(), isNull(), isNull(), isNull(), eq("createdAt")))
+                    .thenReturn(pageResult);
 
             mockMvc.perform(get("/favorites")
                             .param("page", "1")
@@ -158,7 +161,8 @@ class FavoriteControllerTest {
         void list_DefaultParams() throws Exception {
             PageResult<FavoriteResponse> pageResult = new PageResult<>(
                     List.of(), 0, 1, 10);
-            when(favoriteService.list(anyLong(), anyInt(), anyInt())).thenReturn(pageResult);
+            when(favoriteService.list(anyLong(), anyInt(), anyInt(), isNull(), isNull(), isNull(), eq("createdAt")))
+                    .thenReturn(pageResult);
 
             mockMvc.perform(get("/favorites"))
                     .andExpect(status().isOk())
@@ -186,6 +190,7 @@ class FavoriteControllerTest {
         void addFavorite_RemarkTooLong() throws Exception {
             FavoriteRequest request = new FavoriteRequest();
             request.setInterviewId(100L);
+            request.setQuestionId(10L);
             request.setRemark("a".repeat(201));
 
             mockMvc.perform(post("/favorites")
@@ -195,18 +200,16 @@ class FavoriteControllerTest {
         }
 
         @Test
-        @DisplayName("收藏 - 达到上限")
-        void addFavorite_LimitReached() throws Exception {
+        @DisplayName("收藏 - 不再限制收藏总数")
+        void addFavorite_NoGlobalLimit() throws Exception {
             FavoriteRequest request = new FavoriteRequest();
             request.setInterviewId(100L);
-            doThrow(new BusinessException(4001, "收藏数已达上限"))
-                    .when(favoriteService).addFavorite(anyLong(), anyLong(), any(), any());
+            request.setQuestionId(10L);
 
             mockMvc.perform(post("/favorites")
                             .contentType("application/json")
                             .content(objectMapper.writeValueAsString(request)))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value(4001));
+                    .andExpect(status().isOk());
         }
 
         @Test

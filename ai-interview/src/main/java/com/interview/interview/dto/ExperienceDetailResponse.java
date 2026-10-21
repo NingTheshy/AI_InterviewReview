@@ -18,7 +18,10 @@ import java.util.List;
 public class ExperienceDetailResponse {
 
     /** 分享 Token */
-    private String token;
+    private Long id;
+    private String authorNickname;
+    private String authorAvatar;
+    private String summaryMarkdown;
 
     /** 面试标题 */
     private String title;
@@ -69,7 +72,7 @@ public class ExperienceDetailResponse {
     private Integer viewCount;
 
     /** 发布时间 */
-    private LocalDateTime createdAt;
+    private LocalDateTime publishedAt;
 
     /**
      * 问题条目
@@ -81,6 +84,7 @@ public class ExperienceDetailResponse {
         private Integer questionIndex;
         private String questionText;
         private Integer score;
+        private String answerDifference;
         private String improvementTip;
         private String referenceAnswer;
     }

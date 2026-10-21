@@ -20,6 +20,11 @@ public class FavoriteResponse {
 
     /** 问题 ID */
     private Long questionId;
+    private String questionText;
+    private String referenceAnswer;
+    private Integer score;
+    private String interviewTitle;
+    private Boolean archived;
 
     /** 收藏备注 */
     private String remark;

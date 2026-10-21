@@ -60,6 +60,14 @@ public class ScoringServiceImpl implements ScoringService {
                 text, jdText, resumeText, positionTitle, industry, companyTier, savedRubrics);
     }
 
+    @Override
+    public String analyzeWithRubricSnapshot(String text, String jdText, String resumeText,
+            String positionTitle, String companyName, String industry, Integer companyTier,
+            String encryptedSnapshot, List<SavedRubric> savedRubrics) {
+        return rubricScoringService.analyzeWithClient(aiClientFactory.getLlmClientFromSnapshot(encryptedSnapshot),
+                text, jdText, resumeText, positionTitle, companyName, industry, companyTier, savedRubrics);
+    }
+
     /** 每批最多评估的问题数 */
     private static final int BATCH_SIZE = 8;
 

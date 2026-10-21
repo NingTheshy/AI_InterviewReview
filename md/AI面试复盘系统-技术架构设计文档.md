@@ -1,8 +1,10 @@
 # AI 面试复盘系统 - 技术架构设计文档
 
-> 版本: v1.1 MVP
-> 日期: 2026-10-20
-> 状态: 已同步 Spring AI 统一模型层
+> 版本: v1.2 面试业务闭环
+> 日期: 2026-10-21
+> 状态: 已同步 Spring AI 统一模型层、异步简历与可靠任务状态机
+
+> **当前架构基线：** ASR 仅使用 FunASR 自定义 Spring AI `TranscriptionModel`；DeepSeek/MiMo 使用 Spring AI `ChatModel`。简历和面试均采用带任务令牌、租约和启动恢复的异步任务；音频为 MP3/WAV、最大 2GB、最长 2 小时；私密分享已收敛为数字 ID 公开面经。
 
 ---
 
@@ -280,8 +282,8 @@ spring:
     type: com.alibaba.druid.pool.DruidDataSource
   servlet:
     multipart:
-      max-file-size: 200MB
-      max-request-size: 200MB
+      max-file-size: 2GB
+      max-request-size: 2GB
 
 mybatis-plus:
   configuration:

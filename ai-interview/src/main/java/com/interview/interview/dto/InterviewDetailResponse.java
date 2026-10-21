@@ -93,6 +93,9 @@ public class InterviewDetailResponse {
     /** 问题列表 */
     private List<QuestionResponse> questions;
 
+    /** 重评后不再匹配的问题，仍保留其笔记与收藏关联。 */
+    private List<QuestionResponse> archivedQuestions;
+
     /** 创建时间 */
     private LocalDateTime createdAt;
 

@@ -103,7 +103,7 @@ void deleteComment(Long commentId);
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/admin/experiences` | 面经列表（分页） |
-| PUT | `/admin/experiences/{token}/status` | 下架/恢复面经 |
+| PUT | `/admin/experiences/{id}/status` | 下架/恢复面经 |
 
 **AdminCommentController.java** — `/admin/comments`
 
@@ -158,7 +158,7 @@ void deleteComment(Long commentId);
 | 端点 | 测试用例 |
 |------|----------|
 | GET /admin/experiences | 成功、空列表 |
-| PUT /admin/experiences/{token}/status | 成功、不存在 |
+| PUT /admin/experiences/{id}/status | 成功、不存在 |
 
 **AdminCommentControllerTest.java** — 新增 6 tests
 

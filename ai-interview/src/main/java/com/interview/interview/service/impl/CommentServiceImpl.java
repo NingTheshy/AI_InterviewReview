@@ -9,9 +9,9 @@ import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
 import com.interview.interview.dto.CommentResponse;
 import com.interview.interview.entity.InterviewComment;
-import com.interview.interview.entity.InterviewShare;
+import com.interview.interview.entity.InterviewExperience;
 import com.interview.interview.mapper.InterviewCommentMapper;
-import com.interview.interview.mapper.InterviewShareMapper;
+import com.interview.interview.mapper.InterviewExperienceMapper;
 import com.interview.interview.service.CommentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,28 +35,20 @@ import java.util.stream.Collectors;
 public class CommentServiceImpl implements CommentService {
 
     private final InterviewCommentMapper commentMapper;
-    private final InterviewShareMapper shareMapper;
+    private final InterviewExperienceMapper experienceMapper;
     private final UserMapper userMapper;
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public PageResult<CommentResponse> listByShareToken(String token, int page, int size) {
-        // 通过 token 查找分享记录
-        LambdaQueryWrapper<InterviewShare> shareWrapper = new LambdaQueryWrapper<>();
-        shareWrapper.eq(InterviewShare::getShareToken, token);
-        InterviewShare share = shareMapper.selectOne(shareWrapper);
-
-        if (share == null) {
-            throw new BusinessException(ErrorCode.SHARE_NOT_FOUND.getCode(),
-                    ErrorCode.SHARE_NOT_FOUND.getMessage());
-        }
+    public PageResult<CommentResponse> listByExperienceId(Long experienceId, int page, int size) {
+        InterviewExperience experience = requireVisible(experienceId);
 
         // 查询该分享下的所有评论（分页）
         Page<InterviewComment> pageParam = new Page<>(page, size);
         LambdaQueryWrapper<InterviewComment> commentWrapper = new LambdaQueryWrapper<>();
-        commentWrapper.eq(InterviewComment::getShareId, share.getId());
+        commentWrapper.eq(InterviewComment::getExperienceId, experience.getId());
         commentWrapper.orderByDesc(InterviewComment::getCreatedAt);
 
         Page<InterviewComment> result = commentMapper.selectPage(pageParam, commentWrapper);
@@ -97,7 +89,7 @@ public class CommentServiceImpl implements CommentService {
      * {@inheritDoc}
      */
     @Override
-    public void addComment(String token, Long userId, String content) {
+    public void addComment(Long experienceId, Long userId, String content) {
         // 验证评论内容
         if (content == null || content.trim().isEmpty()) {
             throw new BusinessException(ErrorCode.COMMENT_EMPTY.getCode(),
@@ -108,24 +100,16 @@ public class CommentServiceImpl implements CommentService {
                     ErrorCode.COMMENT_TOO_LONG.getMessage());
         }
 
-        // 查找分享记录
-        LambdaQueryWrapper<InterviewShare> shareWrapper = new LambdaQueryWrapper<>();
-        shareWrapper.eq(InterviewShare::getShareToken, token);
-        InterviewShare share = shareMapper.selectOne(shareWrapper);
-
-        if (share == null) {
-            throw new BusinessException(ErrorCode.SHARE_NOT_FOUND.getCode(),
-                    ErrorCode.SHARE_NOT_FOUND.getMessage());
-        }
+        InterviewExperience experience = requireVisible(experienceId);
 
         // 创建评论
         InterviewComment comment = new InterviewComment();
-        comment.setShareId(share.getId());
+        comment.setExperienceId(experience.getId());
         comment.setUserId(userId);
         comment.setContent(content.trim());
         commentMapper.insert(comment);
 
-        log.info("用户发表评论: userId={}, token={}", userId, token);
+        log.info("用户发表评论: userId={}, experienceId={}", userId, experienceId);
     }
 
     /**
@@ -148,8 +132,8 @@ public class CommentServiceImpl implements CommentService {
         }
 
         // 检查是否是面经发布者
-        InterviewShare share = shareMapper.selectById(comment.getShareId());
-        if (share != null && share.getUserId().equals(userId)) {
+        InterviewExperience experience = experienceMapper.selectById(comment.getExperienceId());
+        if (experience != null && experience.getUserId().equals(userId)) {
             // 面经发布者可以删除评论
             commentMapper.deleteById(commentId);
             log.info("面经发布者删除评论: commentId={}, userId={}", commentId, userId);
@@ -159,5 +143,14 @@ public class CommentServiceImpl implements CommentService {
         // 无权删除
         throw new BusinessException(ErrorCode.COMMENT_ACCESS_DENIED.getCode(),
                 ErrorCode.COMMENT_ACCESS_DENIED.getMessage());
+    }
+
+    private InterviewExperience requireVisible(Long id) {
+        InterviewExperience value = experienceMapper.selectById(id);
+        if (value == null || !value.isVisible()) {
+            throw new BusinessException(ErrorCode.EXPERIENCE_NOT_FOUND.getCode(),
+                    ErrorCode.EXPERIENCE_NOT_FOUND.getMessage());
+        }
+        return value;
     }
 }
