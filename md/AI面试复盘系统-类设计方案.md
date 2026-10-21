@@ -4,8 +4,8 @@
 | --- | --- |
 | 项目名称 | AI InterviewReview（AI 面试复盘系统） |
 | 文档类型 | 类设计说明书 / BCE 分析类设计 |
-| 文档版本 | V1.0 |
-| 编制日期 | 2026-10-19 |
+| 文档版本 | V1.1 |
+| 编制日期 | 2026-10-20 |
 | 适用范围 | 后端 `AI_InterviewReview` 与前端 `AI_InterviewReview_front` |
 | 设计依据 | 当前 Java、Vue 源码，数据库初始化脚本及模块配置 |
 
@@ -206,9 +206,9 @@ Controller 的职责限定为参数绑定、Bean Validation、获取当前用户
 
 | 边界接口 | 适配实现 | 外部系统 |
 | --- | --- | --- |
-| `AsrClient` / `WholeFileAsrClient` | `FunAsrClient`、`DashScopeAsrClient`、`WhisperAsrClient` | FunASR、DashScope、Whisper/OpenAI 兼容 ASR |
-| `LlmClient` | `DeepSeekLlmClient`、`SpringAiDeepSeekLlmClient`、`SpringAiOpenAiCompatibleLlmClient`、`XiaomiLlmClient` | DeepSeek、OpenAI 兼容及小米模型服务 |
-| `AiModelClient` | `OpenAiCompatibleClient` | 通用 OpenAI 兼容模型接口 |
+| `AsrClient` / `WholeFileAsrClient` | `SpringAiFunAsrClient`、`SpringAiWhisperAsrClient` | Spring AI FunASR 自定义模型、Spring AI OpenAI 转写模型 |
+| `LlmClient` | `SpringAiDeepSeekLlmClient`、`SpringAiOpenAiCompatibleLlmClient` | Spring AI DeepSeek 与 OpenAI 兼容文本模型 |
+| `TranscriptionModel` | `FunAsrTranscriptionModel` | DashScope FunASR 异步任务协议、时间戳和说话人元数据 |
 | 文件边界 | `FileServiceImpl`、`FileUtil`、`PdfParser` | 本地上传目录、简历 PDF |
 | 缓存边界 | `RedisUtil` | 验证码、令牌/会话相关缓存 |
 

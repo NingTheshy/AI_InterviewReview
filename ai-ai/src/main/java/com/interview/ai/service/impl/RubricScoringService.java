@@ -42,7 +42,7 @@ public class RubricScoringService {
     private static final int TRANSCRIPT_CHUNK_SIZE = 5000;
     private static final int QUESTION_BATCH_SIZE = 8;
     private static final Pattern TRANSCRIPT_MARKER = Pattern.compile(
-            "\\[startTimeMs=(\\d+),endTimeMs=(\\d+),speakerId=([^]]+)]");
+            "\\[startTimeMs=(\\d+),endTimeMs=(\\d+),speakerId=([^,\\]]+)(?:,speakerRole=([^\\]]+))?]");
     private static final List<String> DIMENSIONS = List.of("CONTENT", "LOGIC", "EXPRESSION", "PROFESSIONAL");
     private static final Map<String, Double> STATUS_FACTOR = Map.of(
             "FULLY_COVERED", 1.0,
@@ -70,10 +70,17 @@ public class RubricScoringService {
     public String analyze(String transcript, String jdText, String resumeText, String positionTitle,
                           String industry, Integer companyTier, Long configId,
                           List<ScoringService.SavedRubric> savedRubrics) {
+        return analyzeWithClient(resolveClient(configId), transcript, jdText, resumeText, positionTitle,
+                industry, companyTier, savedRubrics);
+    }
+
+    public String analyzeWithClient(LlmClient client, String transcript, String jdText, String resumeText,
+                                    String positionTitle, String industry, Integer companyTier,
+                                    List<ScoringService.SavedRubric> savedRubrics) {
         if (transcript == null || transcript.isBlank()) {
             throw failure("面试转录为空，无法评分");
         }
-        LlmClient client = resolveClient(configId);
+        Long configId = null;
         String tierName = CompanyTier.fromCode(companyTier == null ? 3 : companyTier).getName();
         ArrayNode questions = identifyQuestions(client, transcript, configId);
         ArrayNode scoredQuestions = mapper.createArrayNode();
@@ -83,24 +90,38 @@ public class RubricScoringService {
             for (int i = start; i < Math.min(start + QUESTION_BATCH_SIZE, questions.size()); i++) {
                 batch.add(questions.get(i));
             }
-            ArrayNode standards = resolveStandards(client, batch, jdText, resumeText,
+            ArrayNode scoringBatch = mapper.createArrayNode();
+            for (JsonNode question : batch) {
+                if ("HIGH".equals(question.path("confidence").asText())) {
+                    scoringBatch.add(question);
+                } else {
+                    scoredQuestions.add(unscoredQuestion(question));
+                }
+            }
+            if (scoringBatch.isEmpty()) continue;
+            ArrayNode standards = resolveStandards(client, scoringBatch, jdText, resumeText,
                     positionTitle, industry, tierName, companyTier, configId, savedRubrics);
-            ArrayNode assessments = compareAnswers(client, batch, standards, configId);
+            ArrayNode assessments = compareAnswers(client, scoringBatch, standards, configId);
             Map<Integer, JsonNode> standardByIndex = byQuestionIndex(standards);
             Map<Integer, JsonNode> assessmentByIndex = byQuestionIndex(assessments);
-            for (JsonNode question : batch) {
+            for (JsonNode question : scoringBatch) {
                 int index = question.path("questionIndex").asInt();
                 scoredQuestions.add(scoreQuestion(question, standardByIndex.get(index),
                         assessmentByIndex.get(index), positionTitle, industry, companyTier));
             }
         }
 
-        JsonNode summary = summarize(client, scoredQuestions, configId);
+        ArrayNode includedQuestions = mapper.createArrayNode();
+        for (JsonNode question : scoredQuestions) {
+            if (question.path("includedInScore").asBoolean(false)) includedQuestions.add(question);
+        }
+        JsonNode summary = includedQuestions.isEmpty() ? emptySummary() : summarize(client, includedQuestions, configId);
         ObjectNode result = mapper.createObjectNode();
-        result.put("dimensionContent", average(scoredQuestions, "dimensionContent"));
-        result.put("dimensionLogic", average(scoredQuestions, "dimensionLogic"));
-        result.put("dimensionExpression", average(scoredQuestions, "dimensionExpression"));
-        result.put("dimensionProfessional", average(scoredQuestions, "dimensionProfessional"));
+        result.put("scorableQuestionCount", includedQuestions.size());
+        result.put("dimensionContent", average(includedQuestions, "dimensionContent"));
+        result.put("dimensionLogic", average(includedQuestions, "dimensionLogic"));
+        result.put("dimensionExpression", average(includedQuestions, "dimensionExpression"));
+        result.put("dimensionProfessional", average(includedQuestions, "dimensionProfessional"));
         result.put("dimensionCommunication", summary.path("dimensionCommunication").asInt());
         // ScoreResultParser 统一使用 ScoringWeights 计算整体总分。
         result.put("overallScore", 0);
@@ -212,12 +233,12 @@ public class RubricScoringService {
             }
             String chunk = transcript.substring(start, end);
             String prompt = "请从下面的面试转录中提取真实的问答对。保留原文，不要补写问题或回答。"
-                    + "每句话前的 startTimeMs、endTimeMs 和 speakerId 均来自 ASR，必须原样引用，不能猜测。"
+                    + "每句话前的 startTimeMs、endTimeMs、speakerId 和 speakerRole 均来自 ASR，必须原样引用。"
                     + "遇到段首或段尾不完整的问答，尽量保留可确认的部分。\n\n" + chunk;
             String system = """
                     你是面试转录整理员。根据语义及说话人标记区分面试官提问和候选人回答。
                     返回 JSON 数组，每项格式：
-                    {"questionText":"原文问题","answerText":"原文回答",
+                    {"questionText":"原文问题","answerText":"原文回答","questionType":"TECHNICAL|OBJECTIVE|PERSONAL|PROJECT|BEHAVIORAL",
                      "questionSpeakerId":"提问句的原始speakerId","answerSpeakerId":"回答句的原始speakerId",
                      "questionStartTimeMs":提问首句的startTimeMs,"answerEndTimeMs":回答末句的endTimeMs,
                      "confidence":"HIGH或LOW"}
@@ -231,6 +252,7 @@ public class RubricScoringService {
                 item.put("questionText", question.path("questionText").asText());
                 item.put("answerText", question.path("answerText").asText());
                 item.put("confidence", question.path("confidence").asText());
+                item.put("questionType", question.path("questionType").asText("OBJECTIVE"));
                 copyText(question, item, "questionSpeakerId");
                 copyText(question, item, "answerSpeakerId");
                 copyLong(question, item, "questionStartTimeMs");
@@ -252,13 +274,16 @@ public class RubricScoringService {
         for (JsonNode question : questions) {
             input.add(mapper.createObjectNode()
                     .put("questionIndex", question.path("questionIndex").asInt())
-                    .put("questionText", question.path("questionText").asText()));
+                    .put("questionText", question.path("questionText").asText())
+                    .put("questionType", question.path("questionType").asText("OBJECTIVE")));
         }
         String prompt = "题目：" + input + "\n岗位：" + safe(positionTitle) + "\n行业：" + safe(industry)
                 + "\n企业等级：" + tierName + "\nJD：" + safe(jdText)
-                + "\n简历事实背景（仅用于辨别项目追问，不得降低满分标准）：" + safe(resumeText);
+                + "\n候选人简历：" + safe(resumeText);
         String system = """
-                你是资深面试官。仅根据题目及岗位背景，为每题独立建立满分标准。
+                你是资深面试官。根据题型、题目及岗位背景，为每题独立建立满分标准。
+                TECHNICAL 和 OBJECTIVE 题不得使用候选人简历改变客观结论；PERSONAL、PROJECT、BEHAVIORAL
+                题必须以简历事实为边界生成个性化示范回答，严禁编造简历中不存在的经历。
                 你不会看到候选人的回答。标准答案应说明准确结论、核心原理、边界条件和权衡。
                 返回与输入题目一一对应的 JSON 数组：
                 [{"questionIndex":1,"referenceAnswer":"完整的满分示范回答","items":[
@@ -393,6 +418,9 @@ public class RubricScoringService {
         ObjectNode result = mapper.createObjectNode();
         result.put("questionIndex", question.path("questionIndex").asInt());
         result.put("questionText", question.path("questionText").asText());
+        result.put("questionType", question.path("questionType").asText("OBJECTIVE"));
+        result.put("recognitionConfidence", question.path("confidence").asText());
+        result.put("includedInScore", true);
         result.put("answerText", question.path("answerText").asText());
         if (question.hasNonNull("questionSpeakerId")) {
             result.put("questionSpeakerId", question.path("questionSpeakerId").asText());
@@ -416,8 +444,41 @@ public class RubricScoringService {
         result.put("dimensionProfessional", dimensionScores.path("professional").asInt());
         result.put("referenceAnswer", standard.path("referenceAnswer").asText());
         result.put("improvementTip", assessment.path("improvementTip").asText());
+        result.put("answerDifference", assessment.path("improvementTip").asText());
         result.set("rubricDetail", detail);
         return result;
+    }
+
+    /** 低置信度问答仅供用户核对，不生成分数或进入汇总。 */
+    private ObjectNode unscoredQuestion(JsonNode question) {
+        ObjectNode result = mapper.createObjectNode();
+        result.put("questionIndex", question.path("questionIndex").asInt());
+        result.put("questionText", question.path("questionText").asText());
+        result.put("answerText", question.path("answerText").asText());
+        result.put("questionType", question.path("questionType").asText("OBJECTIVE"));
+        result.put("recognitionConfidence", "LOW");
+        result.put("includedInScore", false);
+        copyText(question, result, "questionSpeakerId");
+        copyText(question, result, "answerSpeakerId");
+        result.put("questionSpeaker", "INTERVIEWER");
+        result.put("answerSpeaker", "CANDIDATE");
+        if (question.path("questionStartTimeMs").isIntegralNumber()) {
+            result.put("startTime", question.path("questionStartTimeMs").asLong() / 1000);
+        }
+        if (question.path("answerEndTimeMs").isIntegralNumber()) {
+            result.put("endTime", (question.path("answerEndTimeMs").asLong() + 999) / 1000);
+        }
+        result.put("improvementTip", "问答边界或说话人角色置信度较低，请先校正说话人后重新分析");
+        return result;
+    }
+
+    private ObjectNode emptySummary() {
+        ObjectNode summary = mapper.createObjectNode();
+        summary.put("dimensionCommunication", 0);
+        summary.put("strengths", "");
+        summary.put("weaknesses", "未识别到可可靠评分的问题");
+        summary.put("improvementSummary", "请校正说话人角色后重新分析");
+        return summary;
     }
 
     /** 通过结构化输出调用模型，并在返回前执行阶段特定校验。 */
@@ -448,6 +509,8 @@ public class RubricScoringService {
         for (JsonNode question : node) {
             requiredText(question, "questionText");
             require(question.path("answerText").isTextual(), "回答必须是文本");
+            require(Set.of("TECHNICAL", "OBJECTIVE", "PERSONAL", "PROJECT", "BEHAVIORAL")
+                    .contains(question.path("questionType").asText()), "问题类型无效");
             require(Set.of("HIGH", "LOW").contains(question.path("confidence").asText()), "识别置信度无效");
             if (!metadata.speakerIds().isEmpty()) {
                 String questionSpeakerId = requiredText(question, "questionSpeakerId");
@@ -589,6 +652,7 @@ public class RubricScoringService {
     }
 
     private int average(ArrayNode questions, String field) {
+        if (questions.isEmpty()) return 0;
         int total = 0;
         for (JsonNode question : questions) total += question.path(field).asInt();
         return (int) Math.round((double) total / questions.size());

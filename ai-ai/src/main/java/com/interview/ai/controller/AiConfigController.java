@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * AI 配置管理控制器
@@ -97,6 +98,15 @@ public class AiConfigController {
         return Result.success();
     }
 
+    @Operation(summary = "测试 AI 配置的完整调用链路")
+    @PostMapping("/{id}/test")
+    @PreAuthorize("hasAuthority('ai_config:manage')")
+    public Result<String> testConnection(@PathVariable Long id,
+                                         @RequestParam(value = "audioFile", required = false)
+                                         MultipartFile audioFile) {
+        return Result.success(aiConfigService.testConnection(id, audioFile));
+    }
+
     private AiConfigResponse toResponse(AiConfig config) {
         return AiConfigResponse.builder()
                 .id(config.getId())
@@ -109,6 +119,9 @@ public class AiConfigController {
                 .isDefault(config.getIsDefault())
                 .sortOrder(config.getSortOrder())
                 .status(config.getStatus())
+                .testStatus(config.getTestStatus())
+                .lastTestedAt(config.getLastTestedAt())
+                .lastTestMessage(config.getLastTestMessage())
                 .createdAt(config.getCreatedAt())
                 .build();
     }

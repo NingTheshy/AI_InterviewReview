@@ -26,7 +26,7 @@ class ScoreResultParserTest {
     void storesRubricAsJsonAndComputesOverallScoreOnServer() {
         Interview interview = new Interview();
         interview.setId(7L);
-        new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
+        int scorableCount = new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
                 {"overallScore":0,"dimensionContent":80,"dimensionLogic":70,
                  "dimensionExpression":60,"dimensionProfessional":90,"dimensionCommunication":50,
                  "questions":[{"questionIndex":1,"questionText":"题目","answerText":"回答",
@@ -34,6 +34,7 @@ class ScoreResultParserTest {
                    "rubricDetail":{"version":"rubric-v1","items":[{"id":"a","weight":100}]}}]}
                 """);
 
+        assertEquals(1, scorableCount);
         assertEquals(73, interview.getOverallScore());
         ArgumentCaptor<InterviewQuestion> saved = ArgumentCaptor.forClass(InterviewQuestion.class);
         verify(questionMapper).insert(saved.capture());
@@ -45,12 +46,13 @@ class ScoreResultParserTest {
     void legacyResultKeepsRubricNull() {
         Interview interview = new Interview();
         interview.setId(8L);
-        new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
+        int scorableCount = new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
                 {"dimensionContent":70,"dimensionLogic":70,"dimensionExpression":70,
                  "dimensionProfessional":70,"dimensionCommunication":70,
                  "questions":[{"questionIndex":1,"questionText":"题目","score":70}]}
                 """);
 
+        assertEquals(1, scorableCount);
         ArgumentCaptor<InterviewQuestion> saved = ArgumentCaptor.forClass(InterviewQuestion.class);
         verify(questionMapper).insert(saved.capture());
         assertNull(saved.getValue().getRubricDetail());
@@ -65,7 +67,7 @@ class ScoreResultParserTest {
                  {"text":"我负责核心模块","speakerId":"1","speakerRole":"UNKNOWN","startTimeMs":1000,"endTimeMs":4100}]
                 """);
 
-        new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
+        int scorableCount = new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
                 {"dimensionContent":80,"dimensionLogic":80,"dimensionExpression":80,
                  "dimensionProfessional":80,"dimensionCommunication":80,
                  "questions":[{"questionIndex":1,"questionText":"请介绍项目","answerText":"我负责核心模块",
@@ -74,6 +76,7 @@ class ScoreResultParserTest {
                    "startTime":0,"endTime":5,"score":80}]}
                 """);
 
+        assertEquals(1, scorableCount);
         assertTrue(interview.getTranscriptText().contains("[面试官] 请介绍项目"));
         assertTrue(interview.getTranscriptText().contains("[候选人] 我负责核心模块"));
         assertTrue(interview.getTranscriptSegments().contains("\"speakerRole\":\"INTERVIEWER\""));

@@ -3,6 +3,7 @@ package com.interview.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.ai.entity.AiConfig;
+import com.interview.ai.factory.AiClientFactory;
 import com.interview.ai.mapper.AiConfigMapper;
 import com.interview.ai.security.AiConfigSecretCipher;
 import com.interview.auth.service.AuditService;
@@ -18,6 +19,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Base64;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -33,6 +37,9 @@ class AiConfigServiceImplTest {
     @Mock
     private AuditService auditService;
 
+    @Mock
+    private AiClientFactory aiClientFactory;
+
     private AiConfigServiceImpl aiConfigService;
 
     private AiConfigSecretCipher secretCipher;
@@ -43,11 +50,13 @@ class AiConfigServiceImplTest {
     void setUp() {
         secretCipher = new AiConfigSecretCipher(Base64.getEncoder()
                 .encodeToString("0123456789abcdef0123456789abcdef".getBytes()));
-        aiConfigService = new AiConfigServiceImpl(aiConfigMapper, auditService, secretCipher);
+        aiConfigService = new AiConfigServiceImpl(aiConfigMapper, auditService, secretCipher, aiClientFactory);
         mockConfig = new AiConfig();
         mockConfig.setId(1L);
         mockConfig.setConfigName("DeepSeek");
         mockConfig.setProvider("deepseek");
+        mockConfig.setModelName("deepseek-chat");
+        mockConfig.setApiEndpoint("https://api.deepseek.com/v1");
         mockConfig.setConfigType(ConfigType.LLM.getCode());
         mockConfig.setIsDefault(0);
         mockConfig.setStatus(1);
@@ -82,18 +91,12 @@ class AiConfigServiceImplTest {
     }
 
     @Test
-    @DisplayName("create - 设为默认时先取消其他默认")
-    void create_setDefault_clearsExistingDefault() {
+    @DisplayName("create - 未测试的新配置不能直接设为默认")
+    void create_setDefault_rejectedBeforeConnectionTest() {
         mockConfig.setIsDefault(1);
-        AiConfig existingDefault = new AiConfig();
-        existingDefault.setId(2L);
-        existingDefault.setIsDefault(1);
-        when(aiConfigMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(existingDefault);
 
-        aiConfigService.create(mockConfig);
-
-        verify(aiConfigMapper).updateById(existingDefault);
-        verify(aiConfigMapper).insert(mockConfig);
+        assertThrows(BusinessException.class, () -> aiConfigService.create(mockConfig));
+        verify(aiConfigMapper, never()).insert(any());
     }
 
     @Test
@@ -113,6 +116,11 @@ class AiConfigServiceImplTest {
         when(aiConfigMapper.selectById(1L)).thenReturn(existing);
 
         AiConfig request = new AiConfig();
+        request.setConfigName("DeepSeek");
+        request.setProvider("deepseek");
+        request.setModelName("deepseek-chat");
+        request.setApiEndpoint("https://api.deepseek.com/v1");
+        request.setConfigType(ConfigType.LLM.getCode());
         request.setApiKey("****cret");
         aiConfigService.update(1L, request);
 
@@ -146,6 +154,10 @@ class AiConfigServiceImplTest {
     @Test
     @DisplayName("setDefault - 设置默认配置成功")
     void setDefault_exists_setsDefault() {
+        String plainKey = "sk-tested-secret";
+        mockConfig.setApiKey(secretCipher.encrypt(plainKey));
+        mockConfig.setTestStatus(1);
+        mockConfig.setTestFingerprint(fingerprint(mockConfig, plainKey));
         when(aiConfigMapper.selectById(1L)).thenReturn(mockConfig);
         aiConfigService.setDefault(1L);
         assertEquals(1, mockConfig.getIsDefault());
@@ -173,5 +185,16 @@ class AiConfigServiceImplTest {
         assertEquals(1, result.getRecords().size());
         assertEquals(1, result.getTotal());
         assertEquals("sk-list-secret", result.getRecords().get(0).getApiKey());
+    }
+
+    private String fingerprint(AiConfig config, String plainKey) {
+        try {
+            String source = config.getProvider() + "\n" + config.getModelName() + "\n"
+                    + config.getApiEndpoint() + "\n" + config.getConfigType() + "\n" + plainKey;
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(source.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

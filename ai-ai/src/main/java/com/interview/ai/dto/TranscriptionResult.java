@@ -39,6 +39,7 @@ public record TranscriptionResult(
             result.append("[startTimeMs=").append(sentence.startTimeMs())
                     .append(",endTimeMs=").append(sentence.endTimeMs())
                     .append(",speakerId=").append(sentence.speakerId() == null ? "UNKNOWN" : sentence.speakerId())
+                    .append(",speakerRole=").append(sentence.speakerRole() == null ? "UNKNOWN" : sentence.speakerRole())
                     .append("] ")
                     .append(sentence.text().replace('\n', ' ').replace('\r', ' '));
         }

@@ -50,8 +50,8 @@ spring:
           enabled: true
   servlet:
     multipart:
-      max-file-size: 200MB
-      max-request-size: 200MB
+      max-file-size: 2GB
+      max-request-size: 2GB
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
@@ -92,24 +92,17 @@ ai:
       api-endpoint: https://api.deepseek.com/v1
       model-name: deepseek-chat
       timeout-seconds: 600
-    openai:
-      api-key: ${OPENAI_API_KEY}
-      api-endpoint: https://api.openai.com/v1
-      model-name: gpt-4o
-    whisper:
-      api-key: ${WHISPER_API_KEY:${OPENAI_API_KEY}}
-      api-endpoint: https://api.openai.com/v1
-      model-name: whisper-1
     xiaomi:
       api-key: ${XIAOMI_API_KEY}
-      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
+      api-endpoint: https://token-plan-cn.xiaomimimo.com
       model-name: mimo-v2.5-pro
     funasr:
       api-key: ${FUNASR_API_KEY:your_funasr_api_key}
       api-endpoint: ${FUNASR_API_ENDPOINT:https://dashscope.aliyuncs.com/api/v1}
       model-name: ${FUNASR_MODEL_NAME:fun-asr}
   funasr:
-    # DashScope 必须能访问该域名，例如 https://api.example.com；不能使用 localhost。
+    # 开发环境默认使用 DashScope 临时上传；生产环境可切换为 SIGNED_PUBLIC_URL。
+    file-source-mode: ${FUNASR_FILE_SOURCE_MODE:TEMPORARY_UPLOAD}
     public-base-url: ${FUNASR_PUBLIC_BASE_URL:}
     file-url-secret: ${FUNASR_FILE_URL_SECRET:your_funasr_file_url_secret}
     file-url-ttl-seconds: ${FUNASR_FILE_URL_TTL_SECONDS:10800}
@@ -117,6 +110,7 @@ ai:
     speaker-count: ${FUNASR_SPEAKER_COUNT:}
     max-diarization-duration-minutes: ${FUNASR_MAX_DIARIZATION_DURATION_MINUTES:120}
     poll-interval-seconds: ${FUNASR_POLL_INTERVAL_SECONDS:5}
+    task-timeout-seconds: ${FUNASR_TASK_TIMEOUT_SECONDS:10800}
     ffmpeg-path: ${FUNASR_FFMPEG_PATH:ffmpeg}
 
 async:

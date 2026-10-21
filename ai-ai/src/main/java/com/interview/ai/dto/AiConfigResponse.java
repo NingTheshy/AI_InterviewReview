@@ -25,6 +25,9 @@ public class AiConfigResponse {
     private Integer isDefault;
     private Integer sortOrder;
     private Integer status;
+    private Integer testStatus;
+    private LocalDateTime lastTestedAt;
+    private String lastTestMessage;
     private LocalDateTime createdAt;
 
     /**

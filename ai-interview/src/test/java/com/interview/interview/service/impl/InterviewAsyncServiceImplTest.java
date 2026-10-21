@@ -67,6 +67,7 @@ class InterviewAsyncServiceImplTest {
         testInterview.setId(TEST_INTERVIEW_ID);
         testInterview.setStatus(InterviewStatus.PROCESSING.getCode());
         testInterview.setAudioFilePath("test-audio.wav");
+        testInterview.setProcessingToken("test-token");
     }
 
     @Test
@@ -74,19 +75,22 @@ class InterviewAsyncServiceImplTest {
     void processInterview_Success() {
         when(interviewMapper.selectById(TEST_INTERVIEW_ID)).thenReturn(testInterview);
         when(interviewMapper.updateById(any(Interview.class))).thenReturn(1);
-        when(transcriptionService.transcribeDetailed(anyString(), isNull())).thenReturn(
+        when(interviewMapper.ownsTask(TEST_INTERVIEW_ID, "test-token")).thenReturn(1);
+        when(interviewMapper.heartbeat(eq(TEST_INTERVIEW_ID), eq("test-token"), any())).thenReturn(1);
+        when(transcriptionService.transcribeDetailedWithSnapshot(anyString(), isNull())).thenReturn(
                 new TranscriptionResult("面试对话文本",
                         List.of(new AsrSentence("面试对话文本", "0", "UNKNOWN", 0, 1000)), 1));
         when(companyClassifier.classify(isNull(), isNull(), isNull())).thenReturn(CompanyTier.TIER_3);
-        when(scoringService.analyzeWithRubric(anyString(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList()))
+        when(scoringService.analyzeWithRubricSnapshot(anyString(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList()))
                 .thenReturn("{\"overallScore\":85,\"questions\":[]}");
+        when(scoreResultParser.parseAndSave(eq(testInterview), anyString())).thenReturn(1);
 
-        interviewAsyncService.processInterview(TEST_INTERVIEW_ID);
+        interviewAsyncService.processInterview(TEST_INTERVIEW_ID, "test-token");
 
         verify(interviewMapper, atLeast(2)).updateById(any(Interview.class));
-        verify(transcriptionService).transcribeDetailed(anyString(), isNull());
+        verify(transcriptionService).transcribeDetailedWithSnapshot(anyString(), isNull());
         verify(companyClassifier).classify(isNull(), isNull(), isNull());
-        verify(scoringService).analyzeWithRubric(anyString(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList());
+        verify(scoringService).analyzeWithRubricSnapshot(anyString(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList());
         verify(scoreResultParser).parseAndSave(eq(testInterview), anyString());
         org.junit.jupiter.api.Assertions.assertEquals(InterviewStatus.COMPLETED.getCode(), testInterview.getStatus());
     }
@@ -96,7 +100,7 @@ class InterviewAsyncServiceImplTest {
     void processInterview_NotFound() {
         when(interviewMapper.selectById(TEST_INTERVIEW_ID)).thenReturn(null);
 
-        interviewAsyncService.processInterview(TEST_INTERVIEW_ID);
+        interviewAsyncService.processInterview(TEST_INTERVIEW_ID, "test-token");
 
         verify(interviewMapper, never()).updateById(any(Interview.class));
     }
@@ -106,12 +110,13 @@ class InterviewAsyncServiceImplTest {
     void processInterview_AiServiceError() {
         when(interviewMapper.selectById(TEST_INTERVIEW_ID)).thenReturn(testInterview);
         when(interviewMapper.updateById(any(Interview.class))).thenReturn(1);
-        when(transcriptionService.transcribeDetailed(anyString(), isNull()))
+        when(interviewMapper.ownsTask(TEST_INTERVIEW_ID, "test-token")).thenReturn(1);
+        when(transcriptionService.transcribeDetailedWithSnapshot(anyString(), isNull()))
                 .thenThrow(new RuntimeException("AI服务不可用"));
 
-        interviewAsyncService.processInterview(TEST_INTERVIEW_ID);
+        interviewAsyncService.processInterview(TEST_INTERVIEW_ID, "test-token");
 
-        verify(interviewMapper, atLeast(2)).updateById(argThat(interview ->
+        verify(interviewMapper, atLeastOnce()).updateById(argThat(interview ->
                 interview.getStatus() == InterviewStatus.FAILED.getCode()));
     }
 }

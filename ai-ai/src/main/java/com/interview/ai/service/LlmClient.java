@@ -3,7 +3,8 @@ package com.interview.ai.service;
 /**
  * LLM 文本生成客户端接口
  * <p>
- * 定义大语言模型调用的统一接口，不同厂商（DeepSeek、小米、OpenAI 等）实现此接口。
+ * 定义业务层稳定的大语言模型调用接口。所有生产实现必须使用 Spring AI
+ * {@code ChatModel}，避免业务服务依赖厂商协议。
  * </p>
  */
 public interface LlmClient {

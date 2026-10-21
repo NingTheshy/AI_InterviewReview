@@ -14,11 +14,11 @@ import java.util.List;
 /**
  * 将 DashScope FunASR 的转写文件解析为句子级结构化结果。
  */
-final class FunAsrTranscriptionParser {
+public final class FunAsrTranscriptionParser {
 
     private final ObjectMapper objectMapper;
 
-    FunAsrTranscriptionParser(ObjectMapper objectMapper) {
+    public FunAsrTranscriptionParser(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
@@ -33,7 +33,7 @@ final class FunAsrTranscriptionParser {
      * @return 文本摘要及按原始顺序排列的句子列表
      * @throws Exception JSON 无法解析时抛出；字段不完整时抛出业务异常
      */
-    TranscriptionResult parse(String resultJson, boolean diarizationEnabled) throws Exception {
+    public TranscriptionResult parse(String resultJson, boolean diarizationEnabled) throws Exception {
         JsonNode transcripts = objectMapper.readTree(resultJson).path("transcripts");
         if (!transcripts.isArray()) {
             throw invalidResult("Fun-ASR 未返回 transcripts 数组");

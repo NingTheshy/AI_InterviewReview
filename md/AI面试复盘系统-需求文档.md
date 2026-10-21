@@ -156,7 +156,8 @@ ai-interview-backend/                    # 后端根项目 (父 POM)
 │       │   ├── AiConfigService.java
 │       │   ├── TranscriptionService.java  # 语音转文字
 │       │   ├── ScoringService.java        # 评分服务
-│       │   └── AiModelClient.java         # AI模型调用客户端
+│       │   ├── LlmClient.java             # Spring AI 文本模型业务适配接口
+│       │   └── AsrClient.java             # Spring AI 转写模型业务适配接口
 │       ├── mapper/
 │       │   └── AiConfigMapper.java
 │       ├── entity/

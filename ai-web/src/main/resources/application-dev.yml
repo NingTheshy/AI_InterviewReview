@@ -14,7 +14,7 @@ ai:
   providers:
     xiaomi:
       api-key: ${XIAOMI_API_KEY}
-      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
+      api-endpoint: https://token-plan-cn.xiaomimimo.com
       model-name: mimo-v2.5-pro
 
 mybatis-plus:

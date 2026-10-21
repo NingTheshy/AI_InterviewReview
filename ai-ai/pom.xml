@@ -26,19 +26,13 @@
             <artifactId>ai-auth</artifactId>
         </dependency>
 
-        <!-- Spring WebFlux (用于 AI 模型异步调用) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
-        </dependency>
-
         <!-- Spring AI DeepSeek：替代手写 Chat Completions 协议客户端 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-deepseek</artifactId>
         </dependency>
 
-        <!-- MiMo 等 OpenAI 兼容文本模型适配器 -->
+        <!-- MiMo 等 OpenAI 兼容文本模型，以及 Whisper 音频转写模型 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-openai</artifactId>

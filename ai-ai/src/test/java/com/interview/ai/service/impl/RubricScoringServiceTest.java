@@ -55,6 +55,7 @@ class RubricScoringServiceTest {
         when(invoker.invoke(any(), anyString(), anyString(), isNull()))
                 .thenReturn(json("""
                         [{"questionText":"请解释缓存一致性。","answerText":"我的回答提到了缓存和数据库。",
+                          "questionType":"TECHNICAL",
                           "questionSpeakerId":"0","answerSpeakerId":"1",
                           "questionStartTimeMs":1000,"answerEndTimeMs":8000,"confidence":"HIGH"}]
                         """))
@@ -98,7 +99,7 @@ class RubricScoringServiceTest {
         when(clientFactory.getDefaultLlmClient()).thenReturn(client);
         when(invoker.invoke(any(), anyString(), anyString(), isNull()))
                 .thenReturn(json("""
-                        [{"questionText":"问题","answerText":"回答","confidence":"HIGH"}]
+                        [{"questionText":"问题","answerText":"回答","questionType":"TECHNICAL","confidence":"HIGH"}]
                         """))
                 .thenReturn(json(standards(90)));
 
@@ -122,7 +123,7 @@ class RubricScoringServiceTest {
         when(clientFactory.getDefaultLlmClient()).thenReturn(client);
         when(invoker.invoke(any(), anyString(), anyString(), isNull()))
                 .thenReturn(json("""
-                        [{"questionText":"请解释缓存一致性。","answerText":"我的回答","confidence":"HIGH"}]
+                        [{"questionText":"请解释缓存一致性。","answerText":"我的回答","questionType":"TECHNICAL","confidence":"HIGH"}]
                         """))
                 .thenReturn(json("""
                         [{"questionIndex":1,"improvementTip":"补充细节","items":[

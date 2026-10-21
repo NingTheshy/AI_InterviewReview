@@ -6,6 +6,7 @@ import com.interview.common.utils.SecurityUtils;
 import com.interview.interview.dto.InterviewDetailResponse;
 import com.interview.interview.dto.InterviewListResponse;
 import com.interview.interview.dto.InterviewStatusResponse;
+import com.interview.interview.dto.SpeakerRoleMappingRequest;
 import com.interview.interview.service.InterviewService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,6 +15,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.Valid;
+import java.util.List;
 
 /**
  * 面试控制器
@@ -47,7 +50,8 @@ public class InterviewController {
     @PreAuthorize("hasAuthority('interview:create')")
     public Result<Long> upload(
             @RequestParam("audioFile") MultipartFile audioFile,
-            @RequestParam(value = "resumeFile") MultipartFile resumeFile,
+            @RequestParam(value = "resumeId", required = false) Long resumeId,
+            @RequestParam(value = "resumeFile", required = false) MultipartFile resumeFile,
             @RequestParam("jdText") @NotBlank(message = "岗位JD不能为空") String jdText,
             @RequestParam(value = "title", required = false) String title,
             @RequestParam(value = "companyName", required = false) String companyName,
@@ -55,8 +59,11 @@ public class InterviewController {
             @RequestParam(value = "industry", required = false) String industry,
             @RequestParam(value = "interviewType", required = false) String interviewType) {
         Long userId = SecurityUtils.getCurrentUserId();
-        Long id = interviewService.upload(userId, audioFile, resumeFile, jdText,
-                title, companyName, positionTitle, industry, interviewType);
+        Long id = resumeId == null
+                ? interviewService.upload(userId, audioFile, resumeFile, jdText,
+                        title, companyName, positionTitle, industry, interviewType)
+                : interviewService.upload(userId, audioFile, resumeId, resumeFile, jdText,
+                        title, companyName, positionTitle, industry, interviewType);
         return Result.success(id);
     }
 
@@ -142,6 +149,30 @@ public class InterviewController {
     public Result<Void> retry(@PathVariable Long id) {
         Long userId = SecurityUtils.getCurrentUserId();
         interviewService.retry(id, userId);
+        return Result.success();
+    }
+
+    @Operation(summary = "获取七天内可恢复的面试")
+    @GetMapping("/recycle-bin")
+    @PreAuthorize("hasAuthority('interview:read')")
+    public Result<List<InterviewListResponse>> recycleBin() {
+        return Result.success(interviewService.recycleBin(SecurityUtils.getCurrentUserId()));
+    }
+
+    @Operation(summary = "恢复已删除的面试")
+    @PostMapping("/{id}/restore")
+    @PreAuthorize("hasAuthority('interview:manage')")
+    public Result<Void> restore(@PathVariable Long id) {
+        interviewService.restore(id, SecurityUtils.getCurrentUserId());
+        return Result.success();
+    }
+
+    @Operation(summary = "校正说话人角色并重新分析")
+    @PutMapping("/{id}/speaker-roles")
+    @PreAuthorize("hasAuthority('interview:manage')")
+    public Result<Void> updateSpeakerRoles(@PathVariable Long id,
+                                           @Valid @RequestBody SpeakerRoleMappingRequest request) {
+        interviewService.updateSpeakerRoles(id, SecurityUtils.getCurrentUserId(), request);
         return Result.success();
     }
 }

@@ -5,6 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * AI 面试复盘服务的 Spring Boot 启动入口。
@@ -14,6 +15,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
  */
 @SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})
 @EnableAsync
+@EnableScheduling
 @MapperScan("com.interview.**.mapper")
 public class AiInterviewApplication {
 

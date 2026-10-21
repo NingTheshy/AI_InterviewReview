@@ -5,6 +5,8 @@ import com.interview.common.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 /**
  * AI 配置实体类
  * <p>
@@ -26,4 +28,8 @@ public class AiConfig extends BaseEntity {
     private Integer isDefault;
     private Integer sortOrder;
     private Integer status;
+    private Integer testStatus;
+    private String testFingerprint;
+    private LocalDateTime lastTestedAt;
+    private String lastTestMessage;
 }

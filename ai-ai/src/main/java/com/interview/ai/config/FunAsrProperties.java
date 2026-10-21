@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "ai.funasr")
 public class FunAsrProperties {
 
+    /** TEMPORARY_UPLOAD 仅供开发测试；SIGNED_PUBLIC_URL 用于生产公网地址。 */
+    private String fileSourceMode = "TEMPORARY_UPLOAD";
+
     /** 应用可被 DashScope 访问的公网根地址，例如 https://api.example.com。 */
     private String publicBaseUrl;
 
@@ -30,6 +33,9 @@ public class FunAsrProperties {
 
     /** 轮询任务的间隔。 */
     private int pollIntervalSeconds = 5;
+
+    /** 单个异步识别任务最长等待时间，与文件URL有效期解耦。 */
+    private int taskTimeoutSeconds = 10800;
 
     /** FFmpeg 可执行文件路径；默认从系统 PATH 查找。 */
     private String ffmpegPath = "ffmpeg";

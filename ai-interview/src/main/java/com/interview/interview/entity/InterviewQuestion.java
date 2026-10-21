@@ -13,6 +13,9 @@ public class InterviewQuestion extends BaseEntity {
     private Long interviewId;
     private Integer questionIndex;
     private String questionText;
+    private String questionType;
+    private String recognitionConfidence;
+    private Integer includedInScore;
     private String questionSpeaker;
     private String answerText;
     private String answerSpeaker;
@@ -25,5 +28,6 @@ public class InterviewQuestion extends BaseEntity {
     private Integer dimensionProfessional;
     private String improvementTip;
     private String referenceAnswer;
+    private String answerDifference;
     private String rubricDetail;
 }

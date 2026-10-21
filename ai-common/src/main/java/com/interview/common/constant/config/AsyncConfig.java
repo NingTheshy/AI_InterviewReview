@@ -13,7 +13,7 @@ import java.util.concurrent.ThreadPoolExecutor;
  * 异步任务线程池配置
  * <p>
  * 配置用于面试异步处理的线程池，支持核心线程数、最大线程数、队列容量等参数。
- * 拒绝策略采用 CallerRunsPolicy，当线程池满时由调用线程执行任务。
+ * 拒绝策略采用 AbortPolicy。AI 任务可能持续数分钟甚至更久，绝不能回退到上传请求线程执行。
  * </p>
  */
 @Configuration
@@ -39,7 +39,7 @@ public class AsyncConfig {
         executor.setMaxPoolSize(maxPoolSize);
         executor.setQueueCapacity(queueCapacity);
         executor.setThreadNamePrefix(threadNamePrefix);
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
     }

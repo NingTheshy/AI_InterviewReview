@@ -1,10 +1,12 @@
 # AI 面试复盘系统 - 开发文档
 
-> 版本: v2.1
+> 版本: v2.2
 > 日期: 2026-10-20
 > 适用对象: 项目开发人员、运维人员、技术负责人
 
-> 评分实现更新：本文后续关于阶梯制评分和 `SCORING_TWO_PHASE` 的描述属于旧版本。当前处理流程为“识别问答 → 生成满分答案与量表 → 逐项比对 → 服务端计分 → 整场汇总”，以根目录 `README.md` 和 `RubricScoringService` 为准。已有数据库需先执行 `sql/upgrade_rubric_scoring.sql`。
+> 评分实现更新：本文后续关于阶梯制评分和 `SCORING_TWO_PHASE` 的描述属于旧版本。当前处理流程为“识别问答 → 生成满分答案与量表 → 逐项比对 → 服务端计分 → 整场汇总”，以根目录 `README.md` 和 `RubricScoringService` 为准。数据库完整结构以 `sql/schema.sql` 为准。
+
+> AI 技术栈更新：所有生产文本模型均通过 Spring AI `ChatModel` 调用；Whisper 使用 Spring AI 官方转写模型；FunASR 因 Spring AI 1.1.8 尚无官方 DashScope 转写 provider，使用项目自定义的 Spring AI `TranscriptionModel`。旧 WebFlux 模型客户端已删除。
 
 ---
 
@@ -34,6 +36,7 @@
 |------|------|------|
 | Java | 17 LTS | 编程语言 |
 | Spring Boot | 3.5.15 | 后端框架 |
+| Spring AI | 1.1.8 | DeepSeek、MiMo、Whisper 与 FunASR 的统一模型调用层 |
 | Spring Security | 6.2.x | 安全认证 |
 | MyBatis-Plus | 3.5.5 | ORM 框架 |
 | MySQL | 8.0+ | 关系型数据库 |
@@ -122,15 +125,20 @@ mysql -u root -p
 
 # 执行建表脚本
 source /path/to/AI_InterviewReview/sql/schema.sql
+
+# 执行初始化数据脚本
+source /path/to/AI_InterviewReview/sql/data.sql
 ```
 
 **建表脚本自动完成：**
 - 创建 `ai_interview` 数据库
-- 创建 12 张业务表
+- 创建 13 张业务与权限管理表
+
+**初始化数据脚本自动完成：**
 - 初始化角色数据（admin、user）
-- 初始化权限数据（8 项权限）
-- 创建默认管理员账号（用户名: admin，密码: admin123）
-- 创建默认 AI 配置（DeepSeek + Whisper）
+- 初始化 20 项权限及角色权限关系
+- 初始化默认 AI 配置（DeepSeek、Whisper、FunASR、MIMO）
+- 不创建固定密码的管理员账号；首个管理员由 `RBAC_BOOTSTRAP_ADMIN_*` 环境变量安全引导创建
 
 ### 2.5 第四步：配置修改
 
@@ -482,9 +490,8 @@ InterviewServiceImpl.upload()
 InterviewAsyncServiceImpl.processInterview(interviewId)
     │
     ├── Step 1: 语音转文字 (processingStep=1)
-    │   └── TranscriptionService.transcribe(audioPath, configId)
-    │       ├── 小文件（≤ 6MB）：直传 ASR
-    │       └── 大文件（> 6MB）：预处理 → 静音切片 → 并发 ASR → 文本合并
+    │   └── TranscriptionService.transcribeDetailed(audioPath, configId)
+    │       └── 整段音频 → 单声道 WAV → Spring AI FunASR 模型 → 句子时间戳与 speakerId
     │
     ├── Step 1.5: 公司分级
     │   └── CompanyClassifier.classify(companyName, industry, jdText)
@@ -511,7 +518,7 @@ InterviewAsyncServiceImpl.processInterview(interviewId)
     └── Step 4: 完成 (status=COMPLETED)
 ```
 
-### 6.3 音频分片转录流程
+### 6.3 FunASR 整段转录流程
 
 ```
 原始音频文件
@@ -519,39 +526,19 @@ InterviewAsyncServiceImpl.processInterview(interviewId)
     ▼
 TranscriptionServiceImpl.transcribe()
     │
-    ├── 文件 ≤ 6MB → 直传 ASR → 返回文本
-    │
-    └── 文件 > 6MB → 分片处理
-        │
-        ▼
-    AudioPreprocessor.preprocess()
-        ├── WAV: javax.sound.sampled 直接处理
-        └── MP3/其他: FFmpeg 转换为 16kHz 16bit 单声道 WAV
-        │
-        ▼
-    AudioSplitter.split()
-        ├── SilenceDetector: 20ms 帧 RMS 能量检测
-        │   └── RMS < 300 → 静音帧
-        ├── 连续静音 ≥ 1.0s → 切分点
-        ├── 最小片段 30s，最大片段 180s
-        └── 每个片段附加上一片段尾部 1.5s 重叠窗口
-        │
-        ▼
-    ReliableSender.sendAll()
-        ├── Semaphore(2) 控制并发窗口
-        ├── 每次 ASR 调用 Future.get(30s) 超时保护
-        ├── 失败重试 3 次（指数退避）
-        └── 全局超时保护
-        │
-        ▼
-    TextMerger.merge()
-        ├── 按 seq 排序
-        ├── 滑动窗口匹配前一片段尾部与当前片段头部
-        ├── 精确匹配优先，模糊匹配兜底（容差 15%）
-        └── 保守裁剪：trimPoint = windowLen - diffCount
-        │
-        ▼
-    完整转录文本
+    ▼
+AudioPreprocessor.preprocessToMonoWav()
+    │  转为模型支持的单声道 WAV，不进行固定分片
+    ▼
+SpringAiFunAsrClient
+    ▼
+FunAsrTranscriptionModel (Spring AI TranscriptionModel)
+    ├── 生成 HMAC 短时音频 URL
+    ├── 提交 DashScope 异步转写任务
+    ├── 轮询任务并下载结果
+    └── 在 Spring AI 响应元数据中保留句子时间戳和 speakerId
+    ▼
+TranscriptionResult（文本 + 句子列表 + 音频时长）
 ```
 
 ---
@@ -606,22 +593,19 @@ TranscriptionServiceImpl.transcribe()
 
 #### 根因分析
 
-1. `WebClient` 的 `.block()` 没有设置超时，会无限等待
+1. 早期手写 `WebClient` 调用的 `.block()` 没有设置超时，会无限等待
 2. 原始 chunk size 为 15000 字符，LLM 处理慢且容易输出格式错误的 JSON
 
 #### 解决方案
 
-**1. WebClient 超时保护**
+**1. Spring AI 模型调用超时保护**
 
 ```java
-// DeepSeekLlmClient.java
+// SpringAiDeepSeekLlmClient.java
 private Duration callTimeout = Duration.ofMinutes(5);  // 可配置
 
-String responseJson = webClient.post()
-    .uri("/chat/completions")
-    .bodyValue(body)
-    .retrieve()
-    .bodyToMono(String.class)
+String response = Mono.fromCallable(() -> chatModel.call(prompt)
+        .getResult().getOutput().getText())
     .timeout(callTimeout)  // 超时保护
     .block();
 ```
@@ -642,7 +626,7 @@ ai:
 ```
 
 **文件变更**：
-- `DeepSeekLlmClient.java` — 添加 timeout、重试机制
+- `SpringAiDeepSeekLlmClient.java` — 使用 Spring AI 并保留 timeout、重试机制
 - `ScoringServiceImpl.java` — chunk size 15000 → 5000
 - `AiProviderProperties.java` — 新增 `timeoutSeconds` 字段
 - `AiClientConfig.java` — 设置超时
@@ -656,7 +640,7 @@ LLM 调用偶尔超时或返回错误，直接导致整个面试处理失败。
 
 #### 解决方案
 
-在 `DeepSeekLlmClient` 中添加自动重试：
+在 `SpringAiDeepSeekLlmClient` 中添加自动重试：
 
 ```
 第 1 次失败 → 等 5 秒 → 重试
@@ -671,7 +655,7 @@ LLM 调用偶尔超时或返回错误，直接导致整个面试处理失败。
 - 最大 3 次重试，指数退避
 
 **文件变更**：
-- `DeepSeekLlmClient.java` — 重写 `call()` 方法，拆分为 `call()` + `doCall()`
+- `SpringAiDeepSeekLlmClient.java` — `call()` 负责重试，`doCall()` 调用 Spring AI `ChatModel`
 
 ### 7.4 重试功能扩展
 
@@ -719,7 +703,11 @@ if (interview.getStatus() == InterviewStatus.PROCESSING.getCode()) {
 **文件变更**：
 - `ScoringServiceImpl.java` — 替换 `splitIntoSegments()` 为 `splitTranscript()`（字符级分块），重写 Prompt
 
-### 7.6 音频分片转录 — 内容丢失修复
+### 7.6 历史音频分片方案（已从运行路径移除）
+
+本节仅保留旧 MiMo-ASR 分片问题的演进记录。当前生产路径不再包含
+`AudioSplitter`、`ReliableSender`、`TextMerger` 或 `AudioChunkProperties`，以 6.3 节的
+Spring AI FunASR 整段转写流程为准。
 
 #### 问题描述
 
@@ -793,7 +781,8 @@ currentText 头部 = "负责系统架构设"      (7字符，ASR少1字)
 
 ### 8.1 架构设计
 
-AI 模块采用**注册式工厂 + 策略模式**，支持运行时切换 AI 模型。
+AI 模块采用 **Spring AI 模型 API + 业务适配器 + 注册式工厂**，支持运行时切换模型，
+业务服务不直接拼装任何厂商 HTTP 请求。
 
 ```
 AiProperties (yml 配置)
@@ -802,11 +791,14 @@ AiProperties (yml 配置)
 AiClientConfig (@Bean 初始化)
     │ 注册到 AiClientFactory
     │
-    ├── "deepseek"  -> DeepSeekLlmClient (LLM)
-    ├── "xiaomi"    -> XiaomiLlmClient (LLM)
-    ├── "funasr"    -> DashScopeAsrClient (ASR)
-    ├── "whisper"   -> WhisperAsrClient (ASR)
-    └── "xiaomi-asr" -> XiaomiAsrClient (ASR)
+    ├── "deepseek" -> SpringAiDeepSeekLlmClient
+    │                  └── Spring AI DeepSeekChatModel
+    ├── "xiaomi"   -> SpringAiOpenAiCompatibleLlmClient
+    │                  └── Spring AI OpenAiChatModel
+    ├── "whisper"  -> SpringAiWhisperAsrClient
+    │                  └── Spring AI OpenAiAudioTranscriptionModel
+    └── "funasr"   -> SpringAiFunAsrClient
+                       └── 自定义 Spring AI FunAsrTranscriptionModel
     │
     ▼
 TranscriptionService / ScoringService / CompanyClassifier
@@ -822,16 +814,12 @@ LlmClient.call() / AsrClient.transcribe()
 |------|---------|------|
 | AiClientFactory | `ai-ai/.../factory/AiClientFactory.java` | AI 客户端工厂 |
 | AiClientConfig | `ai-ai/.../config/AiClientConfig.java` | 客户端注册配置 |
-| DeepSeekLlmClient | `ai-ai/.../client/DeepSeekLlmClient.java` | DeepSeek LLM 客户端（含重试） |
-| XiaomiLlmClient | `ai-ai/.../client/XiaomiLlmClient.java` | 小米 LLM 客户端（继承 DeepSeek） |
-| DashScopeAsrClient | `ai-ai/.../client/DashScopeAsrClient.java` | 阿里云 ASR 客户端 |
-| WhisperAsrClient | `ai-ai/.../client/WhisperAsrClient.java` | OpenAI Whisper ASR 客户端 |
-| XiaomiAsrClient | `ai-ai/.../client/XiaomiAsrClient.java` | 小米 ASR 客户端 |
+| SpringAiDeepSeekLlmClient | `ai-ai/.../client/SpringAiDeepSeekLlmClient.java` | Spring AI DeepSeek 文本模型适配器（含重试） |
+| SpringAiOpenAiCompatibleLlmClient | `ai-ai/.../client/SpringAiOpenAiCompatibleLlmClient.java` | Spring AI OpenAI 兼容文本模型适配器，用于 MiMo 等模型 |
+| SpringAiWhisperAsrClient | `ai-ai/.../client/SpringAiWhisperAsrClient.java` | Spring AI OpenAI 音频转写适配器 |
+| SpringAiFunAsrClient | `ai-ai/.../client/SpringAiFunAsrClient.java` | 业务 ASR 契约到 Spring AI 的适配器 |
+| FunAsrTranscriptionModel | `ai-ai/.../model/funasr/FunAsrTranscriptionModel.java` | Spring AI 自定义 FunASR 模型，保留句子时间戳与说话人元数据 |
 | AudioPreprocessor | `ai-ai/.../audio/AudioPreprocessor.java` | 音频预处理器 |
-| SilenceDetector | `ai-ai/.../audio/SilenceDetector.java` | 静音检测器 |
-| AudioSplitter | `ai-ai/.../audio/AudioSplitter.java` | 智能切片器 |
-| ReliableSender | `ai-ai/.../audio/ReliableSender.java` | 可靠并发发送器 |
-| TextMerger | `ai-ai/.../audio/TextMerger.java` | 文本合并去重器 |
 | StructuredOutputInvoker | `ai-ai/.../util/StructuredOutputInvoker.java` | LLM 调用工具（重试+JSON修复） |
 | ScoringServiceImpl | `ai-ai/.../service/impl/ScoringServiceImpl.java` | 评分服务实现 |
 | TranscriptionServiceImpl | `ai-ai/.../service/impl/TranscriptionServiceImpl.java` | 转录服务实现 |
@@ -840,7 +828,7 @@ LlmClient.call() / AsrClient.transcribe()
 ### 8.3 LLM 客户端重试机制
 
 ```
-DeepSeekLlmClient.call()
+SpringAiDeepSeekLlmClient.call()
     │
     ├── 第 1 次调用 doCall()
     │   ├── 成功 → 返回结果
@@ -935,7 +923,7 @@ public LlmClient qwenLlmClient() {
         log.warn("未配置 qwen LLM，跳过注册");
         return null;
     }
-    DeepSeekLlmClient client = new DeepSeekLlmClient(props);
+    SpringAiOpenAiCompatibleLlmClient client = new SpringAiOpenAiCompatibleLlmClient(props);
     client.setCallTimeout(Duration.ofSeconds(props.getTimeoutSeconds()));
     aiClientFactory.registerLlmClient("qwen", client);
     return client;
@@ -985,7 +973,7 @@ VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliy
 
 **AI 配置密钥：** 数据库中的 API Key 使用 AES-256-GCM 加密，每次加密生成独立随机 IV，
 密文使用 `enc:v1:` 前缀。主密钥由 `AI_CONFIG_ENCRYPTION_KEY` 提供；应用启动时会迁移历史明文，
-并验证已有密文能否使用当前主密钥解密。旧库需先执行 `sql/upgrade_security_p1_v1_6.sql`。
+并验证已有密文能否使用当前主密钥解密。当前字段结构以 `sql/schema.sql` 为准；旧库升级前必须备份并进行结构差异迁移。
 
 **接口列表：**
 
@@ -1161,7 +1149,7 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 检查项：
 1. MySQL 服务是否启动
 2. `DB_HOST`、`DB_PORT`、`DB_USERNAME`、`DB_PASSWORD` 环境变量是否正确
-3. 数据库 `ai_interview` 是否已创建（执行 `sql/schema.sql`）
+3. 数据库 `ai_interview` 是否已创建，并已依次执行 `sql/schema.sql`、`sql/data.sql`
 
 ### Q2: AI 调用失败（3002 错误）
 
@@ -1226,13 +1214,13 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 
 | 功能 | 说明 | 涉及文件 |
 |------|------|---------|
-| 音频分片转录 | 大音频自动切片 → 并发 ASR → 文本合并 | `AudioPreprocessor`, `AudioSplitter`, `SilenceDetector`, `ReliableSender`, `TextMerger`, `AudioChunkProperties` |
+| FunASR 整段转写 | 单声道 WAV → 公网签名 URL → 异步 ASR，保留时间戳与说话人 | `AudioPreprocessor`, `FunAsrTranscriptionModel` |
 | 阶梯制评分 | LLM 输出分类而非分数，提高准确性 | `ScoringServiceImpl` |
 | 证据锚定 | 每个评分维度必须引用原文 | `ScoringServiceImpl` |
 | 双阶段评估 | 分析 → 评分分离，可选高精度模式 | `ScoringServiceImpl`, `InterviewAsyncServiceImpl` |
 | LLM 问题识别 | 语义识别 QA 对，替代正则拆分 | `ScoringServiceImpl` |
-| LLM 调用重试 | 3 次重试，指数退避 | `DeepSeekLlmClient` |
-| ASR 超时保护 | 每次调用 30 秒超时 | `ReliableSender` |
+| LLM 调用重试 | 3 次重试，指数退避 | `SpringAiDeepSeekLlmClient`, `SpringAiOpenAiCompatibleLlmClient` |
+| ASR 超时保护 | FunASR 请求超时与签名 URL 总截止时间 | `FunAsrTranscriptionModel` |
 | LLM 超时可配置 | 通过 `timeout-seconds` 配置 | `AiProviderProperties`, `AiClientConfig` |
 | PROCESSING 可重试 | 卡住的记录允许强制重试 | `InterviewServiceImpl` |
 
@@ -1241,9 +1229,9 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 | 问题 | 根因 | 修复 | 涉及文件 |
 |------|------|------|---------|
 | 评分不准确 | LLM 直接输出 0-100 分数不稳定 | 阶梯制评分 + 证据锚定 | `ScoringServiceImpl` |
-| 评分超时 | WebClient 无超时 + chunk 太大 | 添加 timeout + chunk 5000 | `DeepSeekLlmClient`, `ScoringServiceImpl` |
+| 评分超时 | 早期 HTTP 调用无超时 + chunk 太大 | Spring AI 调用 timeout + chunk 5000 | `SpringAiDeepSeekLlmClient`, `ScoringServiceImpl` |
 | 只识别 1 个问题 | 正则拆分在 ASR 文本上失效 | LLM 语义识别 | `ScoringServiceImpl` |
-| 转录文本丢失 60% | TextMerger 误裁 + ASR 无超时 + 阈值硬编码 | 保守裁剪 + 超时保护 + 可配置阈值 | `TextMerger`, `ReliableSender`, `SilenceDetector`, `AudioChunkProperties` |
+| 旧分片转录文本丢失 | 分片合并误裁 | 移除旧 MiMo-ASR 分片链路，改为 FunASR 整段转写 | `FunAsrTranscriptionModel`, `TranscriptionServiceImpl` |
 | 重试仅限失败状态 | 状态检查过严 | 放宽为任意状态可重试 | `InterviewServiceImpl` |
 
 ### v1.0 (2026-06-03)
@@ -1265,6 +1253,7 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 | ai-web/src/main/resources/application.yml | 主配置文件 |
 | ai-web/src/main/resources/application-dev.yml | 开发环境配置 |
 | sql/schema.sql | 数据库建表脚本 |
+| sql/data.sql | 数据库初始化数据脚本 |
 | pom.xml | 父 POM |
 
 ### 14.2 核心源码文件
@@ -1292,17 +1281,12 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 | ai-ai/.../factory/AiClientFactory.java | AI 客户端工厂 |
 | ai-ai/.../config/AiClientConfig.java | 客户端注册配置 |
 | ai-ai/.../config/AiProviderProperties.java | AI 提供商配置属性 |
-| ai-ai/.../config/AudioChunkProperties.java | 音频分片配置属性 |
-| ai-ai/.../client/DeepSeekLlmClient.java | DeepSeek LLM 客户端（含重试） |
-| ai-ai/.../client/XiaomiLlmClient.java | 小米 LLM 客户端 |
-| ai-ai/.../client/DashScopeAsrClient.java | 阿里云 ASR 客户端 |
-| ai-ai/.../client/WhisperAsrClient.java | Whisper ASR 客户端 |
-| ai-ai/.../client/XiaomiAsrClient.java | 小米 ASR 客户端 |
+| ai-ai/.../client/SpringAiDeepSeekLlmClient.java | Spring AI DeepSeek 客户端（含重试） |
+| ai-ai/.../client/SpringAiOpenAiCompatibleLlmClient.java | Spring AI MiMo/OpenAI 兼容客户端 |
+| ai-ai/.../client/SpringAiFunAsrClient.java | FunASR 业务适配器 |
+| ai-ai/.../client/SpringAiWhisperAsrClient.java | Spring AI Whisper 适配器 |
+| ai-ai/.../model/funasr/FunAsrTranscriptionModel.java | 自定义 Spring AI FunASR 转写模型 |
 | ai-ai/.../audio/AudioPreprocessor.java | 音频预处理器 |
-| ai-ai/.../audio/SilenceDetector.java | 静音检测器 |
-| ai-ai/.../audio/AudioSplitter.java | 智能切片器 |
-| ai-ai/.../audio/ReliableSender.java | 可靠并发发送器 |
-| ai-ai/.../audio/TextMerger.java | 文本合并去重器 |
 | ai-ai/.../audio/FfmpegResolver.java | FFmpeg 路径探测器 |
 | ai-ai/.../audio/AudioChunk.java | 音频片段数据类 |
 | ai-ai/.../service/impl/TranscriptionServiceImpl.java | 语音转文字服务 |

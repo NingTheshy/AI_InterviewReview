@@ -8,7 +8,8 @@ import java.time.Duration;
 /**
  * 需要由供应商拉取完整音频文件的 ASR 客户端。
  *
- * <p>该能力与按字节分片直传的 {@link AsrClient} 并存，避免把供应商限制泄漏到业务服务。</p>
+ * <p>该能力与 Spring AI 的通用转写适配器并存，避免把供应商的公网 URL 与异步任务限制
+ * 泄漏到业务服务。</p>
  */
 public interface WholeFileAsrClient extends AsrClient {
 

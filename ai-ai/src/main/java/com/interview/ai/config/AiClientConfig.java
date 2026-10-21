@@ -2,6 +2,7 @@ package com.interview.ai.config;
 
 import com.interview.ai.client.*;
 import com.interview.ai.factory.AiClientFactory;
+import com.interview.ai.model.funasr.FunAsrTranscriptionModel;
 import com.interview.ai.service.AsrClient;
 import com.interview.ai.service.LlmClient;
 import lombok.RequiredArgsConstructor;
@@ -50,21 +51,9 @@ public class AiClientConfig {
             log.warn("未配置 funasr ASR，跳过注册");
             return null;
         }
-        AsrClient client = new FunAsrClient(props, funAsrProperties);
+        FunAsrTranscriptionModel model = new FunAsrTranscriptionModel(props, funAsrProperties);
+        AsrClient client = new SpringAiFunAsrClient(model, props.getModelName());
         aiClientFactory.registerAsrClient("funasr", client);
-        return client;
-    }
-
-    /** 注册兼容历史直传语音识别流程的 Whisper 客户端。 */
-    @Bean
-    public AsrClient whisperAsrClient() {
-        AiProviderProperties props = aiProperties.getProvider("whisper");
-        if (props == null || isPlaceholderApiKey(props.getApiKey())) {
-            log.warn("未配置 whisper ASR，跳过注册");
-            return null;
-        }
-        AsrClient client = new WhisperAsrClient(props);
-        aiClientFactory.registerAsrClient("whisper", client);
         return client;
     }
 

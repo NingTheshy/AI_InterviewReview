@@ -45,11 +45,19 @@ public enum ErrorCode {
     INTERVIEW_NOT_FOUND(2003, "面试记录不存在"),
     INTERVIEW_ACCESS_DENIED(2004, "面试记录不属于当前用户"),
     INTERVIEW_PROCESSING(2005, "面试记录正在处理中，无法重试"),
+    RESUME_REQUIRED(2006, "开始面试前必须选择一份有效简历"),
+    RESUME_NOT_FOUND(2007, "简历不存在或不属于当前用户"),
+    RESUME_NOT_READY(2008, "简历尚未解析成功，请更换简历或稍后重试"),
+    AUDIO_DURATION_EXCEEDED(2009, "音频时长不能超过2小时"),
+    INTERVIEW_RESTORE_EXPIRED(2010, "面试已超过7天恢复期限"),
+    INVALID_SPEAKER_MAPPING(2011, "说话人角色映射不符合要求"),
+    NO_SCORABLE_QUESTIONS(2012, "未识别到可可靠评分的问题"),
 
     // AI 模块 3xxx
     AI_CONFIG_NOT_FOUND(3001, "AI 模型配置不存在"),
     AI_MODEL_CALL_FAILED(3002, "AI 模型调用失败"),
     PROCESSING_FAILED(3003, "面试处理失败"),
+    AI_CONFIG_NOT_TESTED(3004, "AI配置尚未通过连接测试"),
 
     // 收藏/分享模块 4xxx
     FAVORITE_LIMIT(4001, "收藏数已达上限"),

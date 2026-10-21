@@ -52,7 +52,7 @@ public class SpringAiOpenAiCompatibleLlmClient implements LlmClient {
                 .build();
     }
 
-    /** 与既有 XiaomiLlmClient 的默认超时保持一致。 */
+    /** 与既有 MiMo 调用链的默认超时保持一致。 */
     public void setCallTimeout(Duration timeout) {
         this.callTimeout = timeout;
     }

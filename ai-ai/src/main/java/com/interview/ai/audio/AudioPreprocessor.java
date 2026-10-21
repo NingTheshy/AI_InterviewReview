@@ -10,6 +10,8 @@ import javax.sound.sampled.*;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 音频预处理器
@@ -29,6 +31,8 @@ import java.nio.file.Path;
 @Component
 @RequiredArgsConstructor
 public class AudioPreprocessor {
+
+    private static final Pattern DURATION_PATTERN = Pattern.compile("Duration: (\\d{2}):(\\d{2}):(\\d{2}(?:\\.\\d+)?)");
 
     private final FfmpegResolver ffmpegResolver;
 
@@ -126,6 +130,40 @@ public class AudioPreprocessor {
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.AI_MODEL_CALL_FAILED.getCode(),
                     "Fun-ASR 音频预处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 在不执行转码的情况下读取音频时长，用于在创建异步任务前拒绝超过两小时的文件。
+     * FFmpeg 在探测模式下将媒体信息输出到标准错误，因此这里合并输出并解析 Duration 字段。
+     */
+    public double probeDuration(Path inputFile) {
+        String ffmpegPath = ffmpegResolver.resolve();
+        if (ffmpegPath == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "未找到FFmpeg，无法校验音频时长");
+        }
+        try {
+            Process process = new ProcessBuilder(ffmpegPath, "-hide_banner", "-i",
+                    inputFile.toAbsolutePath().toString())
+                    .redirectErrorStream(true)
+                    .start();
+            String output = new String(process.getInputStream().readAllBytes());
+            process.waitFor();
+            Matcher matcher = DURATION_PATTERN.matcher(output);
+            if (!matcher.find()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "无法读取音频时长，请检查文件是否损坏");
+            }
+            int hours = Integer.parseInt(matcher.group(1));
+            int minutes = Integer.parseInt(matcher.group(2));
+            double seconds = Double.parseDouble(matcher.group(3));
+            return hours * 3600D + minutes * 60D + seconds;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "音频时长校验被中断");
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "音频时长校验失败: " + e.getMessage());
         }
     }
 

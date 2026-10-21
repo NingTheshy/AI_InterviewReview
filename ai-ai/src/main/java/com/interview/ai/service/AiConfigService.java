@@ -4,6 +4,7 @@ import com.interview.ai.entity.AiConfig;
 import com.interview.common.result.PageResult;
 
 import java.util.List;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * AI 配置服务接口
@@ -66,4 +67,7 @@ public interface AiConfigService {
      * @param id 配置 ID
      */
     void setDefault(Long id);
+
+    /** 实际调用模型验证配置，成功后才能设为默认。 */
+    String testConnection(Long id, MultipartFile audioSample);
 }

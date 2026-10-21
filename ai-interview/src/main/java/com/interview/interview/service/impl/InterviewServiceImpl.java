@@ -4,29 +4,47 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.interview.ai.audio.AudioPreprocessor;
+import com.interview.ai.factory.AiClientFactory;
 import com.interview.common.constant.ErrorCode;
+import com.interview.common.constant.ConfigType;
 import com.interview.common.constant.InterviewStatus;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
-import com.interview.common.utils.PdfParser;
 import com.interview.interview.dto.InterviewDetailResponse;
 import com.interview.interview.dto.InterviewListResponse;
 import com.interview.interview.dto.InterviewStatusResponse;
+import com.interview.interview.dto.SpeakerRoleMappingRequest;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewQuestion;
+import com.interview.interview.entity.UserResume;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewQuestionMapper;
 import com.interview.interview.service.InterviewAsyncService;
 import com.interview.interview.service.InterviewService;
+import com.interview.interview.service.ResumeService;
 import com.interview.common.utils.FileUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -51,6 +69,9 @@ public class InterviewServiceImpl implements InterviewService {
     private final InterviewMapper interviewMapper;
     private final InterviewQuestionMapper questionMapper;
     private final InterviewAsyncService interviewAsyncService;
+    private final ResumeService resumeService;
+    private final AudioPreprocessor audioPreprocessor;
+    private final AiClientFactory aiClientFactory;
     private final ObjectMapper objectMapper;
 
     @Value("${interview.file.upload-dir:./uploads}")
@@ -69,37 +90,62 @@ public class InterviewServiceImpl implements InterviewService {
      * </p>
      */
     @Override
+    @Transactional
     public Long upload(Long userId, MultipartFile audioFile, MultipartFile resumeFile,
                        String jdText, String title, String companyName,
                        String positionTitle, String industry, String interviewType) {
+        return upload(userId, audioFile, null, resumeFile, jdText, title,
+                companyName, positionTitle, industry, interviewType);
+    }
+
+    @Override
+    @Transactional
+    public Long upload(Long userId, MultipartFile audioFile, Long resumeId, MultipartFile resumeFile,
+                       String jdText, String title, String companyName,
+                       String positionTitle, String industry, String interviewType) {
         FileUtil.validateAudioFile(audioFile);
-        FileUtil.validateResumeFile(resumeFile);
+
+        UserResume resume;
+        if (resumeId != null) {
+            resume = resumeService.requireReady(resumeId, userId);
+        } else if (resumeFile != null && !resumeFile.isEmpty()) {
+            resume = resumeService.upload(userId, resumeFile);
+        } else {
+            throw new BusinessException(ErrorCode.RESUME_REQUIRED.getCode(), ErrorCode.RESUME_REQUIRED.getMessage());
+        }
+
+        Interview active = interviewMapper.selectActiveForUpdate(userId);
+        if (active != null) {
+            throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(),
+                    "当前已有面试正在处理中，请完成或等待失败后再开始新的面试");
+        }
+        String asrSnapshot = aiClientFactory.snapshotDefault(ConfigType.ASR);
+        String llmSnapshot = aiClientFactory.snapshotDefault(ConfigType.LLM);
 
         String audioFileName = FileUtil.generateFileName(audioFile.getOriginalFilename());
+        Path savedAudio;
         try {
-            FileUtil.saveFile(audioFile, uploadDir, audioFileName);
+            savedAudio = FileUtil.saveFile(audioFile, uploadDir, audioFileName);
         } catch (IOException e) {
             log.error("保存音频文件失败", e);
             throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "文件保存失败");
         }
 
-        String resumeFileName = null;
-        String resumeText = null;
-        resumeFileName = FileUtil.generateFileName(resumeFile.getOriginalFilename());
+        int audioDuration;
         try {
-            FileUtil.saveFile(resumeFile, uploadDir, resumeFileName);
-        } catch (IOException e) {
-            log.error("保存简历文件失败", e);
-            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "文件保存失败");
-        }
-
-        // 解析 PDF 提取文本
-        try {
-            resumeText = PdfParser.extractText(resumeFile.getInputStream());
-            log.info("简历 PDF 解析完成: 文件={}, 文本长度={}", resumeFileName, resumeText.length());
-        } catch (IOException e) {
-            log.warn("简历 PDF 解析失败，将使用空文本: 文件={}", resumeFileName, e);
-            resumeText = "";
+            double duration = audioPreprocessor.probeDuration(savedAudio);
+            if (duration > 7200D) {
+                throw new BusinessException(ErrorCode.AUDIO_DURATION_EXCEEDED.getCode(),
+                        ErrorCode.AUDIO_DURATION_EXCEEDED.getMessage());
+            }
+            audioDuration = (int) Math.ceil(duration);
+        } catch (RuntimeException e) {
+            try {
+                Files.deleteIfExists(savedAudio);
+            } catch (IOException cleanupError) {
+                log.warn("清理未创建任务的音频失败: {}", savedAudio, cleanupError);
+            }
+            throw e;
         }
 
         Interview interview = new Interview();
@@ -109,21 +155,65 @@ public class InterviewServiceImpl implements InterviewService {
         interview.setPositionTitle(positionTitle);
         interview.setIndustry(industry);
         interview.setInterviewType(interviewType);
+        interview.setResumeId(resume.getId());
         interview.setJdText(jdText);
         interview.setAudioFilePath(audioFileName);
         interview.setAudioFileSize(audioFile.getSize());
-        interview.setResumeFilePath(resumeFileName);
-        interview.setResumeText(resumeText);
+        interview.setAudioDuration(audioDuration);
+        // 保留旧字段作为历史兼容快照；简历主数据由 user_resume 管理。
+        interview.setResumeFilePath(resume.getFilePath());
+        interview.setResumeText(resume.getParsedText());
         interview.setStatus(InterviewStatus.PROCESSING.getCode());
         interview.setProcessingStep(0);
+        interview.setProcessingToken(UUID.randomUUID().toString());
+        interview.setHeartbeatAt(LocalDateTime.now());
+        interview.setLeaseExpiresAt(LocalDateTime.now().plusMinutes(5));
+        interview.setAsrConfigSnapshot(asrSnapshot);
+        interview.setLlmConfigSnapshot(llmSnapshot);
 
-        interviewMapper.insert(interview);
+        try {
+            interviewMapper.insert(interview);
+        } catch (RuntimeException e) {
+            try {
+                Files.deleteIfExists(savedAudio);
+            } catch (IOException cleanupError) {
+                log.warn("清理数据库写入失败后的音频失败: {}", savedAudio, cleanupError);
+            }
+            throw e;
+        }
 
-        // 异步处理面试
-        interviewAsyncService.processInterview(interview.getId());
+        submitAfterCommit(interview.getId(), interview.getProcessingToken());
 
         log.info("面试记录创建成功: id={}, title={}", interview.getId(), title);
         return interview.getId();
+    }
+
+    /** 确保异步线程只能在面试记录事务提交后读取任务。 */
+    private void submitAfterCommit(Long interviewId, String token) {
+        Runnable submit = () -> {
+            try {
+                interviewAsyncService.processInterview(interviewId, token);
+            } catch (RuntimeException e) {
+                log.error("提交面试异步任务失败: interviewId={}", interviewId, e);
+                Interview failed = interviewMapper.selectById(interviewId);
+                if (failed != null && token.equals(failed.getProcessingToken())) {
+                    failed.setStatus(InterviewStatus.FAILED.getCode());
+                    failed.setLastErrorCode("TASK_REJECTED");
+                    failed.setErrorMessage("系统任务队列繁忙，请稍后重试");
+                    interviewMapper.updateById(failed);
+                }
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    submit.run();
+                }
+            });
+        } else {
+            submit.run();
+        }
     }
 
     /**
@@ -212,6 +302,7 @@ public class InterviewServiceImpl implements InterviewService {
      * </p>
      */
     @Override
+    @Transactional
     public void delete(Long id, Long userId) {
         Interview interview = interviewMapper.selectById(id);
         if (interview == null) {
@@ -223,7 +314,10 @@ public class InterviewServiceImpl implements InterviewService {
                     ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
         }
 
-        interviewMapper.deleteById(id);
+        if (interviewMapper.moveToRecycleBin(id, userId) == 0) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(),
+                    ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
+        }
         log.info("删除面试记录: id={}, userId={}", id, userId);
     }
 
@@ -250,6 +344,9 @@ public class InterviewServiceImpl implements InterviewService {
                 .processingStep(interview.getProcessingStep())
                 .processingStepName(getStepName(interview.getProcessingStep()))
                 .progress(progress)
+                .errorCode(interview.getLastErrorCode())
+                .errorMessage(interview.getErrorMessage())
+                .reanalysisStatus(interview.getReanalysisStatus())
                 .build();
     }
 
@@ -305,6 +402,7 @@ public class InterviewServiceImpl implements InterviewService {
      * </p>
      */
     @Override
+    @Transactional
     public void retry(Long id, Long userId) {
         Interview interview = interviewMapper.selectById(id);
         if (interview == null) {
@@ -315,24 +413,166 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException(ErrorCode.INTERVIEW_ACCESS_DENIED.getCode(),
                     ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
         }
-        // PROCESSING 状态也允许重试（可能是之前卡住的记录）
-        if (interview.getStatus() == InterviewStatus.PROCESSING.getCode()) {
-            log.warn("面试记录处于处理中状态，允许强制重试: interviewId={}", id);
+        Interview active = interviewMapper.selectActiveForUpdate(userId);
+        if (active != null && !active.getId().equals(id)) {
+            throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(),
+                    "当前已有其他面试正在处理中");
+        }
+        if (interview.getStatus() == InterviewStatus.PROCESSING.getCode()
+                && interview.getLeaseExpiresAt() != null
+                && interview.getLeaseExpiresAt().isAfter(LocalDateTime.now())) {
+            throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(),
+                    ErrorCode.INTERVIEW_PROCESSING.getMessage());
         }
 
         // 记录原状态用于日志
         String previousStatus = InterviewStatus.fromCode(interview.getStatus()).getDescription();
 
-        // 重置状态
+        String token = UUID.randomUUID().toString();
+        if (interviewMapper.claimTask(id, token, LocalDateTime.now().plusMinutes(5)) == 0) {
+            throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(),
+                    ErrorCode.INTERVIEW_PROCESSING.getMessage());
+        }
+        // 转写已完整落库时从问答阶段继续，否则从头开始。
         interview.setStatus(InterviewStatus.PROCESSING.getCode());
-        interview.setProcessingStep(0);
+        interview.setProcessingToken(token);
+        interview.setLeaseExpiresAt(LocalDateTime.now().plusMinutes(5));
+        interview.setHeartbeatAt(LocalDateTime.now());
+        interview.setProcessingStep(interview.getTranscriptSegments() == null ? 0 : 1);
+        interview.setLastErrorCode(null);
+        interview.setAsrConfigSnapshot(aiClientFactory.snapshotDefault(ConfigType.ASR));
+        interview.setLlmConfigSnapshot(aiClientFactory.snapshotDefault(ConfigType.LLM));
         interview.setErrorMessage(null);
         interviewMapper.updateById(interview);
 
-        // 重新异步处理
-        interviewAsyncService.processInterview(id);
+        submitAfterCommit(id, token);
 
         log.info("重新处理面试: id={}, 之前状态={}", id, previousStatus);
+    }
+
+    @Override
+    public List<InterviewListResponse> recycleBin(Long userId) {
+        return interviewMapper.selectRecycleBin(userId).stream()
+                .map(this::toInterviewListResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void restore(Long id, Long userId) {
+        Interview deleted = interviewMapper.selectDeletedById(id);
+        if (deleted == null || !userId.equals(deleted.getUserId())) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(),
+                    ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
+        }
+        if (deleted.getPurgedAt() != null || deleted.getPurgeAfter() == null
+                || !deleted.getPurgeAfter().isAfter(LocalDateTime.now())) {
+            throw new BusinessException(ErrorCode.INTERVIEW_RESTORE_EXPIRED.getCode(),
+                    ErrorCode.INTERVIEW_RESTORE_EXPIRED.getMessage());
+        }
+        if (interviewMapper.restore(id, userId) == 0) {
+            throw new BusinessException(ErrorCode.INTERVIEW_RESTORE_EXPIRED.getCode(),
+                    ErrorCode.INTERVIEW_RESTORE_EXPIRED.getMessage());
+        }
+        log.info("恢复面试记录: id={}, userId={}", id, userId);
+    }
+
+    @Override
+    @Transactional
+    public void updateSpeakerRoles(Long id, Long userId, SpeakerRoleMappingRequest request) {
+        Interview interview = interviewMapper.selectById(id);
+        if (interview == null) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(), ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
+        }
+        if (!userId.equals(interview.getUserId())) {
+            throw new BusinessException(ErrorCode.INTERVIEW_ACCESS_DENIED.getCode(), ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
+        }
+        Interview active = interviewMapper.selectActiveForUpdate(userId);
+        if (active != null) {
+            throw new BusinessException(ErrorCode.INTERVIEW_PROCESSING.getCode(), ErrorCode.INTERVIEW_PROCESSING.getMessage());
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(interview.getTranscriptSegments());
+            if (!(parsed instanceof ArrayNode segments) || segments.isEmpty()) {
+                throw new BusinessException(ErrorCode.INVALID_SPEAKER_MAPPING.getCode(), "当前面试没有可校正的说话人转写");
+            }
+            Map<String, String> roles = new HashMap<>();
+            for (SpeakerRoleMappingRequest.Mapping mapping : request.getMappings()) {
+                String role = mapping.getRole().trim().toUpperCase();
+                if (!Set.of("INTERVIEWER", "CANDIDATE").contains(role)
+                        || roles.put(mapping.getSpeakerId(), role) != null) {
+                    throw new BusinessException(ErrorCode.INVALID_SPEAKER_MAPPING.getCode(),
+                            "speakerId不能重复，role只能是INTERVIEWER或CANDIDATE");
+                }
+            }
+            long candidates = roles.values().stream().filter("CANDIDATE"::equals).count();
+            long interviewers = roles.values().stream().filter("INTERVIEWER"::equals).count();
+            if (candidates != 1 || interviewers < 1) {
+                throw new BusinessException(ErrorCode.INVALID_SPEAKER_MAPPING.getCode(),
+                        "必须指定一名候选人和至少一名面试官");
+            }
+            Set<String> actualSpeakers = new HashSet<>();
+            for (JsonNode segment : segments) {
+                if (segment.path("speakerId").isTextual()) actualSpeakers.add(segment.path("speakerId").asText());
+            }
+            if (!actualSpeakers.containsAll(roles.keySet())) {
+                throw new BusinessException(ErrorCode.INVALID_SPEAKER_MAPPING.getCode(), "映射包含转写中不存在的speakerId");
+            }
+
+            StringBuilder readable = new StringBuilder();
+            for (JsonNode segment : segments) {
+                if (!(segment instanceof ObjectNode object)) continue;
+                String speakerId = segment.path("speakerId").asText();
+                String role = roles.getOrDefault(speakerId, "UNKNOWN");
+                object.put("speakerRole", role);
+                if (readable.length() > 0) readable.append('\n');
+                String label = "INTERVIEWER".equals(role) ? "面试官"
+                        : "CANDIDATE".equals(role) ? "候选人" : "说话人 " + speakerId;
+                readable.append('[').append(label).append("] ").append(segment.path("text").asText());
+            }
+            String token = UUID.randomUUID().toString();
+            interview.setTranscriptSegments(objectMapper.writeValueAsString(segments));
+            interview.setTranscriptText(readable.toString());
+            interview.setStatus(InterviewStatus.PROCESSING.getCode());
+            interview.setProcessingStep(1);
+            interview.setProcessingToken(token);
+            interview.setHeartbeatAt(LocalDateTime.now());
+            interview.setLeaseExpiresAt(LocalDateTime.now().plusMinutes(5));
+            interview.setReanalysisStatus("PROCESSING");
+            interview.setReanalysisError(null);
+            interview.setLlmConfigSnapshot(aiClientFactory.snapshotDefault(ConfigType.LLM));
+            interviewMapper.updateById(interview);
+            submitReanalysisAfterCommit(id, token);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.INVALID_SPEAKER_MAPPING.getCode(), "转写数据损坏，无法校正说话人");
+        }
+    }
+
+    private void submitReanalysisAfterCommit(Long interviewId, String token) {
+        Runnable submit = () -> {
+            try {
+                interviewAsyncService.reanalyzeInterview(interviewId, token);
+            } catch (RuntimeException e) {
+                Interview current = interviewMapper.selectById(interviewId);
+                if (current != null && token.equals(current.getProcessingToken())) {
+                    current.setStatus(InterviewStatus.COMPLETED.getCode());
+                    current.setReanalysisStatus("FAILED");
+                    current.setReanalysisError("系统任务队列繁忙，请稍后重试");
+                    current.setProcessingToken(null);
+                    current.setLeaseExpiresAt(null);
+                    interviewMapper.updateById(current);
+                }
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { submit.run(); }
+            });
+        } else {
+            submit.run();
+        }
     }
 
     // ==================== 私有方法 ====================
@@ -372,6 +612,9 @@ public class InterviewServiceImpl implements InterviewService {
                         .id(q.getId())
                         .questionIndex(q.getQuestionIndex())
                         .questionText(q.getQuestionText())
+                        .questionType(q.getQuestionType())
+                        .recognitionConfidence(q.getRecognitionConfidence())
+                        .includedInScore(Integer.valueOf(1).equals(q.getIncludedInScore()))
                         .questionSpeaker(q.getQuestionSpeaker())
                         .answerText(q.getAnswerText())
                         .answerSpeaker(q.getAnswerSpeaker())
@@ -384,6 +627,7 @@ public class InterviewServiceImpl implements InterviewService {
                         .dimensionProfessional(q.getDimensionProfessional())
                         .improvementTip(q.getImprovementTip())
                         .referenceAnswer(q.getReferenceAnswer())
+                        .answerDifference(q.getAnswerDifference())
                         .rubricDetail(parseRubricDetail(q.getRubricDetail()))
                         .build())
                 .collect(Collectors.toList());
@@ -397,6 +641,11 @@ public class InterviewServiceImpl implements InterviewService {
                 .interviewType(interview.getInterviewType())
                 .status(interview.getStatus())
                 .processingStep(interview.getProcessingStep())
+                .lastErrorCode(interview.getLastErrorCode())
+                .errorMessage(interview.getErrorMessage())
+                .reanalysisStatus(interview.getReanalysisStatus())
+                .reanalysisError(interview.getReanalysisError())
+                .resumeId(interview.getResumeId())
                 .audioFilePath(interview.getAudioFilePath())
                 .audioDuration(interview.getAudioDuration())
                 .transcriptText(interview.getTranscriptText())

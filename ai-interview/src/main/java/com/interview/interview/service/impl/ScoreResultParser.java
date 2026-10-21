@@ -49,9 +49,13 @@ public class ScoreResultParser {
      * @param scoreResultJson 已通过评分服务生成的结构化 JSON
      */
     @Transactional
-    public void parseAndSave(Interview interview, String scoreResultJson) {
+    public int parseAndSave(Interview interview, String scoreResultJson) {
         try {
             JsonNode root = objectMapper.readTree(scoreResultJson);
+            JsonNode questionsNode = root.path("questions");
+            int scorableQuestionCount = root.has("scorableQuestionCount")
+                    ? root.path("scorableQuestionCount").asInt(0)
+                    : inferLegacyScorableCount(questionsNode);
 
             Integer dimensionContent = getInt(root, "dimensionContent");
             Integer dimensionLogic = getInt(root, "dimensionLogic");
@@ -59,20 +63,27 @@ public class ScoreResultParser {
             Integer dimensionProfessional = getInt(root, "dimensionProfessional");
             Integer dimensionCommunication = getInt(root, "dimensionCommunication");
 
-            int weightedOverallScore = ScoringWeights.calculateOverallScore(
-                    dimensionContent, dimensionLogic, dimensionExpression,
-                    dimensionProfessional, dimensionCommunication);
-
-            interview.setOverallScore(weightedOverallScore);
-            interview.setDimensionContent(dimensionContent);
-            interview.setDimensionLogic(dimensionLogic);
-            interview.setDimensionExpression(dimensionExpression);
-            interview.setDimensionProfessional(dimensionProfessional);
-            interview.setDimensionCommunication(dimensionCommunication);
+            if (scorableQuestionCount > 0) {
+                int weightedOverallScore = ScoringWeights.calculateOverallScore(
+                        dimensionContent, dimensionLogic, dimensionExpression,
+                        dimensionProfessional, dimensionCommunication);
+                interview.setOverallScore(weightedOverallScore);
+                interview.setDimensionContent(dimensionContent);
+                interview.setDimensionLogic(dimensionLogic);
+                interview.setDimensionExpression(dimensionExpression);
+                interview.setDimensionProfessional(dimensionProfessional);
+                interview.setDimensionCommunication(dimensionCommunication);
+            } else {
+                interview.setOverallScore(null);
+                interview.setDimensionContent(null);
+                interview.setDimensionLogic(null);
+                interview.setDimensionExpression(null);
+                interview.setDimensionProfessional(null);
+                interview.setDimensionCommunication(null);
+            }
             interview.setImprovementSummary(getText(root, "improvementSummary"));
             interview.setStrengths(getText(root, "strengths"));
             interview.setWeaknesses(getText(root, "weaknesses"));
-            JsonNode questionsNode = root.path("questions");
             applySpeakerRoles(interview, questionsNode);
             interviewMapper.updateById(interview);
 
@@ -86,6 +97,11 @@ public class ScoreResultParser {
                     question.setInterviewId(interview.getId());
                     question.setQuestionIndex(getInt(qNode, "questionIndex"));
                     question.setQuestionText(getText(qNode, "questionText"));
+                    question.setQuestionType(getText(qNode, "questionType"));
+                    question.setRecognitionConfidence(getText(qNode, "recognitionConfidence"));
+                    boolean includedInScore = qNode.has("includedInScore")
+                            ? qNode.path("includedInScore").asBoolean(false) : true;
+                    question.setIncludedInScore(includedInScore ? 1 : 0);
                     question.setQuestionSpeaker(getText(qNode, "questionSpeaker"));
                     question.setAnswerText(getText(qNode, "answerText"));
                     question.setAnswerSpeaker(getText(qNode, "answerSpeaker"));
@@ -98,6 +114,7 @@ public class ScoreResultParser {
                     question.setDimensionProfessional(getInt(qNode, "dimensionProfessional"));
                     question.setImprovementTip(getText(qNode, "improvementTip"));
                     question.setReferenceAnswer(getText(qNode, "referenceAnswer"));
+                    question.setAnswerDifference(getText(qNode, "answerDifference"));
                     JsonNode rubricDetail = qNode.path("rubricDetail");
                     if (!rubricDetail.isMissingNode() && !rubricDetail.isNull()) {
                         if (!rubricDetail.isObject()) {
@@ -110,11 +127,24 @@ public class ScoreResultParser {
             }
             log.info("评分结果解析完成: interviewId={}, 问题数={}",
                     interview.getId(), questionsNode.size());
+            return scorableQuestionCount;
         } catch (Exception e) {
             log.error("解析评分结果失败", e);
             throw new BusinessException(ErrorCode.PROCESSING_FAILED.getCode(),
                     "评分结果解析失败: " + e.getMessage());
         }
+    }
+
+    /** 兼容改造前没有可计分标记的历史评分结果；旧问题默认都参与评分。 */
+    private int inferLegacyScorableCount(JsonNode questionsNode) {
+        if (!questionsNode.isArray()) return 0;
+        int count = 0;
+        for (JsonNode question : questionsNode) {
+            if (!question.has("includedInScore") || question.path("includedInScore").asBoolean(false)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /** 读取可选文本字段；缺失和 JSON null 都映射为 {@code null}。 */

@@ -41,6 +41,16 @@ public class InterviewDetailResponse {
     /** 处理步骤：0=待处理, 1=FunASR转写, 2=标准生成与比对, 3=计分保存, 4=整体总结 */
     private Integer processingStep;
 
+    private String lastErrorCode;
+
+    private String errorMessage;
+
+    private String reanalysisStatus;
+
+    private String reanalysisError;
+
+    private Long resumeId;
+
     /** 音频文件名（前端需拼接 /files/ 前缀访问，如 /files/{audioFilePath}） */
     private String audioFilePath;
 
@@ -102,6 +112,12 @@ public class InterviewDetailResponse {
         /** 问题内容 */
         private String questionText;
 
+        private String questionType;
+
+        private String recognitionConfidence;
+
+        private Boolean includedInScore;
+
         /** 提问者业务角色：INTERVIEWER/CANDIDATE */
         private String questionSpeaker;
 
@@ -137,6 +153,8 @@ public class InterviewDetailResponse {
 
         /** 参考答案 */
         private String referenceAnswer;
+
+        private String answerDifference;
 
         /** 新评分模式的逐要点量表；历史记录为空 */
         private JsonNode rubricDetail;

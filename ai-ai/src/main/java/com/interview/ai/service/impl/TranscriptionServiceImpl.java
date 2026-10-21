@@ -25,7 +25,7 @@ import java.util.UUID;
 /**
  * 语音转文字服务实现类
  * <p>
- * 通过 ASR 客户端实现音频文件的语音识别。
+ * 通过 Spring AI ASR 适配客户端实现音频文件的语音识别。
  * 支持指定 ASR 配置或使用默认配置。
  * </p>
  * <p>
@@ -49,7 +49,7 @@ public class TranscriptionServiceImpl implements TranscriptionService {
      * 根据当前 ASR 配置转写本地音频，并尽可能保留结构化转写信息。
      *
      * <p>完整文件客户端（Fun-ASR）走流式预处理路径，避免把长音频读入堆内存；传统直传客户端
-     * 保持原有 {@link MultipartFile} 调用方式。调用方可统一使用返回对象，兼容只提供纯文本的旧模型。</p>
+     * 保持原有 {@link MultipartFile} 调用方式。调用方可统一使用返回对象，兼容只提供纯文本的模型。</p>
      *
      * @param audioFilePath 已保存的音频绝对或相对路径
      * @param configId 指定 AI 配置；为空时使用默认 ASR 配置
@@ -58,6 +58,16 @@ public class TranscriptionServiceImpl implements TranscriptionService {
     @Override
     public TranscriptionResult transcribeDetailed(String audioFilePath, Long configId) {
         log.info("开始语音转文字: filePath={}, configId={}", audioFilePath, configId);
+        return transcribeDetailed(audioFilePath, aiClientFactory.getAsrClientByConfigId(configId));
+    }
+
+    @Override
+    public TranscriptionResult transcribeDetailedWithSnapshot(String audioFilePath, String encryptedSnapshot) {
+        log.info("使用任务配置快照开始语音转文字: filePath={}", audioFilePath);
+        return transcribeDetailed(audioFilePath, aiClientFactory.getAsrClientFromSnapshot(encryptedSnapshot));
+    }
+
+    private TranscriptionResult transcribeDetailed(String audioFilePath, AsrClient selectedClient) {
 
         Path path = Paths.get(audioFilePath);
         if (!Files.exists(path)) {
@@ -66,7 +76,7 @@ public class TranscriptionServiceImpl implements TranscriptionService {
         }
 
         try {
-            AsrClient client = aiClientFactory.getAsrClientByConfigId(configId);
+            AsrClient client = selectedClient;
 
             // Fun-ASR 等长音频异步模型必须以完整文件提交。此分支必须在读取全部字节之前执行，
             // 避免将数百 MB 甚至 GB 级音频载入 JVM 堆内存。

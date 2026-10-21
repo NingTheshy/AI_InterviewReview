@@ -22,4 +22,10 @@ public interface InterviewAsyncService {
      * @param interviewId 面试记录 ID
      */
     void processInterview(Long interviewId);
+
+    /** 使用任务令牌处理，令牌不匹配时必须停止写回。 */
+    void processInterview(Long interviewId, String processingToken);
+
+    /** 保留转写，仅重新执行问答识别与评分。 */
+    void reanalyzeInterview(Long interviewId, String processingToken);
 }

@@ -18,6 +18,11 @@ public interface ScoringService {
                              String positionTitle, String industry, Integer companyTier, Long configId,
                              List<SavedRubric> savedRubrics);
 
+    /** 使用任务开始时保存的加密LLM配置快照评分。 */
+    String analyzeWithRubricSnapshot(String text, String jdText, String resumeText,
+                                     String positionTitle, String industry, Integer companyTier,
+                                     String encryptedSnapshot, List<SavedRubric> savedRubrics);
+
     /**
      * 单次评估：一次性返回所有问题的评分结果
      *

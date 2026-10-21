@@ -4,9 +4,7 @@
 > 日期: 2026-10-20
 > 状态: 已同步完整 RBAC、权限审计与 AI API Key 加密存储设计
 
-> **实施基准：** 新建数据库执行 `sql/schema.sql`；旧库依次执行
-> `sql/upgrade_rbac_v1_5.sql`、`sql/upgrade_security_p1_v1_6.sql`。`user_role` 是用户角色的唯一事实来源，`user` 表不再保存单值
-> `role` 字段。内置管理员账号不写入 SQL，由应用读取 `RBAC_BOOTSTRAP_ADMIN_*` 环境变量安全引导创建。
+> **实施基准：** SQL 统一维护为 `sql/schema.sql`（当前完整结构）和 `sql/data.sql`（可重复执行的初始化数据）。新建数据库按顺序执行这两个文件；项目不再保留历史增量脚本。旧库升级前必须备份并进行结构差异迁移，不能直接重复执行建表脚本。`user_role` 是用户角色的唯一事实来源，`user` 表不再保存单值 `role` 字段。内置管理员账号不写入 SQL，由应用读取 `RBAC_BOOTSTRAP_ADMIN_*` 环境变量安全引导创建。
 
 ---
 
@@ -751,43 +749,12 @@ CREATE TABLE `permission_audit_log` (
 
 ### 5.2 初始化数据
 
-```sql
--- 初始化角色数据
-INSERT INTO `role` (`id`, `role_name`, `role_label`, `is_system`) VALUES
-(1, 'admin', '管理员', 1),
-(2, 'user', '普通用户', 1);
+初始化数据统一维护在 `sql/data.sql`，文档不再复制可执行 SQL，以免形成多个事实来源。该脚本包含：
 
--- 初始化权限数据
-INSERT INTO `permission` (`id`, `permission_name`, `permission_label`) VALUES
-(1, 'interview:create', '创建面试复盘'),
-(2, 'interview:read', '查看本人面试复盘'),
-(3, 'interview:manage', '管理本人面试复盘'),
-(4, 'note:manage', '管理本人笔记'),
-(5, 'favorite:manage', '管理本人收藏'),
-(6, 'share:manage', '管理本人分享'),
-(7, 'comment:manage_own', '发表和管理本人评论'),
-(8, 'user:read', '查看用户'),
-(9, 'user:status:update', '更新用户状态'),
-(10, 'user:role:assign', '分配用户角色'),
-(11, 'interview:read_all', '查看全部面试数据'),
-(12, 'experience:read_all', '查看全部面经'),
-(13, 'experience:manage', '管理面经'),
-(14, 'comment:read_all', '查看全部评论'),
-(15, 'comment:manage', '管理任意评论'),
-(16, 'ai_config:read', '查看AI配置'),
-(17, 'ai_config:manage', '管理AI配置'),
-(18, 'system:stats:read', '查看系统统计'),
-(19, 'system:monitor:read', '查看系统监控'),
-(20, 'audit:read', '查看审计日志');
-
--- user 角色关联权限 1-7；admin 角色关联权限 8-20。
--- 管理员账号必须同时关联 user、admin，最终权限取并集。
--- 初始化脚本不保存固定管理员密码，首个管理员由 RBAC_BOOTSTRAP_ADMIN_* 引导创建。
-
--- 初始化默认 AI 配置（DeepSeek）
-INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`)
-VALUES ('DeepSeek 默认', 'deepseek', 'deepseek-chat', 'https://api.deepseek.com/v1', 2, 1);
-```
+- `user`、`admin` 两个预置角色；
+- 20 个权限码及角色权限关系；
+- DeepSeek、Whisper、FunASR、MIMO 四项默认模型配置；
+- 不包含固定管理员密码，首个管理员由 `RBAC_BOOTSTRAP_ADMIN_*` 安全引导创建。
 
 ### 5.3 MyBatis-Plus 配置
 
@@ -1054,7 +1021,9 @@ mybatis-plus:
 | 1 | 语音转文字 (ASR) |
 | 2 | 文本分析评分 (LLM) |
 
-### 7.3 完整 SQL 脚本
+### 7.3 结构 SQL 参考
+
+以下内容用于辅助阅读表结构；可执行的当前完整结构只维护在 `sql/schema.sql`，初始化数据只维护在 `sql/data.sql`。
 
 ```sql
 -- ============================================================
@@ -1317,16 +1286,12 @@ CREATE TABLE IF NOT EXISTS `permission_audit_log` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限与高风险操作审计日志表';
 
 -- -----------------------------------------------------------
--- 初始化数据
+-- 初始化数据不在结构脚本中维护
 -- -----------------------------------------------------------
 
--- RBAC 初始化数据以 sql/schema.sql 为唯一可执行基准：
+-- sql/data.sql 是初始化数据的唯一可执行基准：
 -- 1. user 角色关联 7 项用户侧权限；
 -- 2. admin 角色关联 13 项管理侧增量权限；
 -- 3. 管理员账号同时关联 user、admin，权限取并集；
 -- 4. 不内置固定管理员密码，由 RBAC_BOOTSTRAP_ADMIN_* 安全引导创建。
-
--- 初始化默认 AI 配置（DeepSeek）
-INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`)
-VALUES ('DeepSeek 默认', 'deepseek', 'deepseek-chat', 'https://api.deepseek.com/v1', 2, 1);
 ```

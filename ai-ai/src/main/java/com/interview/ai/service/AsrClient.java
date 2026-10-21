@@ -5,7 +5,8 @@ import org.springframework.web.multipart.MultipartFile;
 /**
  * ASR 语音转文字客户端接口
  * <p>
- * 定义语音识别的统一接口，不同厂商（DashScope、Whisper 等）实现此接口。
+ * 定义业务层稳定的语音识别接口。所有生产实现必须适配 Spring AI
+ * {@code TranscriptionModel}，供应商协议不能直接泄漏到业务服务。
  * </p>
  */
 public interface AsrClient {

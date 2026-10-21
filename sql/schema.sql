@@ -1,7 +1,8 @@
 -- ============================================================
--- AI 面试复盘系统 - 数据库建表脚本
--- 版本: v1.6 RBAC + P1 安全加固
--- 日期: 2026-10-20
+-- AI 面试复盘系统 - 数据库结构脚本
+-- 版本: 当前完整基线
+-- 日期: 2026-10-21
+-- 说明: 本文件仅维护数据库与表结构；初始化数据见 data.sql。
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS `ai_interview` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
@@ -29,7 +30,28 @@ CREATE TABLE `user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
 
 -- -----------------------------------------------------------
--- 2. 面试记录表
+-- 2. 用户简历版本表
+-- -----------------------------------------------------------
+CREATE TABLE `user_resume` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '简历版本ID',
+    `user_id` BIGINT NOT NULL COMMENT '所属用户ID',
+    `original_name` VARCHAR(255) NOT NULL COMMENT '原始文件名',
+    `file_path` VARCHAR(500) NOT NULL COMMENT '存储文件名',
+    `file_size` BIGINT NOT NULL COMMENT '文件大小(字节)',
+    `content_type` VARCHAR(100) COMMENT 'MIME类型',
+    `content_hash` CHAR(64) NOT NULL COMMENT '文件SHA-256',
+    `parsed_text` LONGTEXT NOT NULL COMMENT '解析后的不可变简历正文',
+    `parse_status` TINYINT NOT NULL DEFAULT 0 COMMENT '解析状态: 0-处理中 1-成功 2-失败',
+    `parse_error` VARCHAR(500) COMMENT '解析失败原因',
+    `deleted` TINYINT DEFAULT 0 COMMENT '从简历库隐藏: 0-可用 1-隐藏',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX `idx_resume_user` (`user_id`, `deleted`, `created_at`),
+    INDEX `idx_resume_hash` (`user_id`, `content_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户可复用简历版本表';
+
+-- -----------------------------------------------------------
+-- 3. 面试记录表
 -- -----------------------------------------------------------
 CREATE TABLE `interview` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '面试记录ID',
@@ -40,6 +62,7 @@ CREATE TABLE `interview` (
     `industry` VARCHAR(50) COMMENT '行业分类',
     `company_tier` TINYINT COMMENT '公司分级: 1-超大厂 2-大厂 3-中厂 4-小厂 5-初创（内部使用，前端不展示）',
     `interview_type` VARCHAR(30) COMMENT '面试类型: coding/behavioral/system_design/comprehensive',
+    `resume_id` BIGINT NOT NULL COMMENT '绑定的用户简历版本ID',
     `audio_file_path` VARCHAR(500) COMMENT '音频文件存储路径',
     `audio_file_size` BIGINT COMMENT '音频文件大小(字节)',
     `audio_duration` INT COMMENT '音频时长(秒)',
@@ -59,8 +82,20 @@ CREATE TABLE `interview` (
     `weaknesses` TEXT COMMENT '待提升方面',
     `status` TINYINT DEFAULT 0 COMMENT '状态: 0-处理中 1-已完成 2-失败',
     `processing_step` TINYINT DEFAULT 0 COMMENT '处理步骤: 0-未开始 1-FunASR转写 2-标准生成与比对 3-计分保存 4-整体总结',
+    `processing_token` VARCHAR(64) COMMENT '当前工作线程令牌',
+    `lease_expires_at` DATETIME COMMENT '任务租约到期时间',
+    `heartbeat_at` DATETIME COMMENT '任务最后心跳时间',
+    `asr_config_snapshot` LONGTEXT COMMENT '加密ASR配置快照',
+    `llm_config_snapshot` LONGTEXT COMMENT '加密LLM配置快照',
+    `last_error_code` VARCHAR(64) COMMENT '稳定失败错误码',
+    `reanalysis_status` VARCHAR(20) COMMENT '角色校正重分析状态',
+    `reanalysis_error` VARCHAR(500) COMMENT '角色校正重分析失败原因',
     `error_message` TEXT COMMENT '失败原因',
+    `deleted_at` DATETIME COMMENT '进入回收站时间',
+    `purge_after` DATETIME COMMENT '允许恢复截止时间',
+    `purged_at` DATETIME COMMENT '敏感业务数据物理清理时间',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
+    `processing_guard` TINYINT GENERATED ALWAYS AS (CASE WHEN `status`=0 AND `deleted`=0 THEN 1 ELSE NULL END) STORED,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX `idx_user_id` (`user_id`),
@@ -69,6 +104,8 @@ CREATE TABLE `interview` (
     INDEX `idx_company_name` (`company_name`),
     INDEX `idx_industry` (`industry`),
     INDEX `idx_interview_type` (`interview_type`)
+    ,UNIQUE INDEX `uk_user_active_processing` (`user_id`, `processing_guard`)
+    ,INDEX `idx_purge_after` (`deleted`, `purged_at`, `purge_after`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试记录表';
 
 -- -----------------------------------------------------------
@@ -79,6 +116,9 @@ CREATE TABLE `interview_question` (
     `interview_id` BIGINT NOT NULL COMMENT '面试记录ID',
     `question_index` INT NOT NULL COMMENT '问题序号',
     `question_text` TEXT COMMENT '问题内容',
+    `question_type` VARCHAR(20) COMMENT '题型: TECHNICAL/OBJECTIVE/PERSONAL/PROJECT/BEHAVIORAL',
+    `recognition_confidence` VARCHAR(10) COMMENT '问答边界置信度: HIGH/LOW',
+    `included_in_score` TINYINT NOT NULL DEFAULT 1 COMMENT '是否参与汇总评分',
     `question_speaker` VARCHAR(20) COMMENT '提问者角色: INTERVIEWER/CANDIDATE',
     `answer_text` TEXT COMMENT '回答内容',
     `answer_speaker` VARCHAR(20) COMMENT '回答者角色: INTERVIEWER/CANDIDATE',
@@ -91,6 +131,7 @@ CREATE TABLE `interview_question` (
     `dimension_professional` INT COMMENT '专业度评分(0-100)',
     `improvement_tip` TEXT COMMENT '改进建议',
     `reference_answer` TEXT COMMENT '参考答案',
+    `answer_difference` TEXT COMMENT '用户答案与满分标准的关键差距',
     `rubric_detail` LONGTEXT COMMENT '评分量表与逐要点比对结果(JSON)',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -179,6 +220,10 @@ CREATE TABLE `ai_config` (
     `is_default` TINYINT DEFAULT 0 COMMENT '是否默认: 0-否 1-是',
     `sort_order` INT DEFAULT 0 COMMENT '排序',
     `status` TINYINT DEFAULT 1 COMMENT '状态: 0-禁用 1-启用',
+    `test_status` TINYINT DEFAULT 0 COMMENT '连接测试: 0-未测试 1-成功 2-失败',
+    `test_fingerprint` CHAR(64) COMMENT '测试成功时的运行参数指纹',
+    `last_tested_at` DATETIME COMMENT '最后测试时间',
+    `last_test_message` VARCHAR(500) COMMENT '最后测试结果',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -253,63 +298,3 @@ CREATE TABLE `permission_audit_log` (
     INDEX `idx_action` (`action`),
     INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限与高风险操作审计日志表';
-
--- ============================================================
--- 初始化数据
--- ============================================================
-
--- 初始化角色数据
-INSERT INTO `role` (`id`, `role_name`, `role_label`, `is_system`) VALUES
-(1, 'admin', '管理员', 1),
-(2, 'user', '普通用户', 1);
-
--- 初始化权限数据
-INSERT INTO `permission` (`id`, `permission_name`, `permission_label`) VALUES
-(1, 'interview:create', '创建面试复盘'),
-(2, 'interview:read', '查看本人面试复盘'),
-(3, 'interview:manage', '管理本人面试复盘'),
-(4, 'note:manage', '管理本人笔记'),
-(5, 'favorite:manage', '管理本人收藏'),
-(6, 'share:manage', '管理本人分享'),
-(7, 'comment:manage_own', '发表和管理本人评论'),
-(8, 'user:read', '查看用户'),
-(9, 'user:status:update', '更新用户状态'),
-(10, 'user:role:assign', '分配用户角色'),
-(11, 'interview:read_all', '查看全部面试数据'),
-(12, 'experience:read_all', '查看全部面经'),
-(13, 'experience:manage', '管理面经'),
-(14, 'comment:read_all', '查看全部评论'),
-(15, 'comment:manage', '管理任意评论'),
-(16, 'ai_config:read', '查看AI配置'),
-(17, 'ai_config:manage', '管理AI配置'),
-(18, 'system:stats:read', '查看系统统计'),
-(19, 'system:monitor:read', '查看系统监控'),
-(20, 'audit:read', '查看审计日志');
-
--- 普通用户角色拥有用户侧权限
-INSERT INTO `role_permission` (`role_id`, `permission_id`) VALUES
-(2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7);
-
--- 管理员角色只声明管理侧增量权限；管理员账号同时关联 user 与 admin，权限取并集
-INSERT INTO `role_permission` (`role_id`, `permission_id`) VALUES
-(1, 8), (1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14),
-(1, 15), (1, 16), (1, 17), (1, 18), (1, 19), (1, 20);
-
--- 不在 SQL 中内置固定管理员密码。应用在无有效权限管理者时读取
--- RBAC_BOOTSTRAP_ADMIN_* 环境变量创建首个同时拥有 user、admin 角色的账号。
-
--- 初始化默认 AI 配置（DeepSeek 文本分析）
-INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `sort_order`)
-VALUES ('DeepSeek 文本分析', 'deepseek', 'deepseek-chat', 'https://api.deepseek.com/v1', 2, 1, 1);
-
--- 初始化默认 AI 配置（Whisper 语音转文字）
-INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `sort_order`)
-VALUES ('Whisper 语音转文字', 'openai', 'whisper-1', 'https://api.openai.com/v1', 1, 0, 2);
-
--- 初始化默认 AI 配置（FunASR 非实时语音识别）
-INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `sort_order`)
-VALUES ('FunASR 语音识别', 'funasr', 'paraformer-v2', 'https://dashscope.aliyuncs.com/api/v1', 1, 1, 1);
-
--- 初始化默认 AI 配置（小米 MIMO-V2.5 文本分析）
-INSERT INTO `ai_config` (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `sort_order`)
-VALUES ('小米 MIMO-V2.5 文本分析', 'xiaomi', 'mimo-v2.5', 'https://token-plan-cn.xiaomimimo.com/v1', 2, 0, 2);

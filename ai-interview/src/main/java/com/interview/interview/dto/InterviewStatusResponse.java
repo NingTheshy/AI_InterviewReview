@@ -24,4 +24,10 @@ public class InterviewStatusResponse {
 
     /** 进度百分比 (0-100) */
     private Integer progress;
+
+    private String errorCode;
+
+    private String errorMessage;
+
+    private String reanalysisStatus;
 }

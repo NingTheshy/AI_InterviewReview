@@ -1,8 +1,8 @@
 # AI 面试复盘系统 - 技术架构设计文档
 
-> 版本: v1.0 MVP  
-> 日期: 2026-05-26  
-> 状态: 已确认
+> 版本: v1.1 MVP
+> 日期: 2026-10-20
+> 状态: 已同步 Spring AI 统一模型层
 
 ---
 
@@ -14,6 +14,7 @@
 |------|------|------|
 | Java | 17 LTS | 长期支持版本，Spring Boot 3.x 最低要求 |
 | Spring Boot | 3.5.15 | 主框架，提供自动配置、嵌入式服务器 |
+| Spring AI | 1.1.8 | 文本生成与语音转写的统一模型 API；FunASR 使用自定义 `TranscriptionModel` |
 | Spring Security | 6.2.x | 安全框架，处理认证授权 |
 | Spring Web (MVC) | 6.1.x | Web 框架，RESTful API 支持 |
 | MyBatis-Plus | 3.5.5 | ORM 框架，简化 CRUD 操作 |

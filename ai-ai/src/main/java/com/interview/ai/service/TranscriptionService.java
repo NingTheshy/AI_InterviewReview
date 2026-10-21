@@ -24,4 +24,7 @@ public interface TranscriptionService {
      * 转录音频并返回句子级时间戳、原始说话人标识及音频时长。
      */
     TranscriptionResult transcribeDetailed(String audioFilePath, Long configId);
+
+    /** 使用任务开始时保存的加密配置快照转写。 */
+    TranscriptionResult transcribeDetailedWithSnapshot(String audioFilePath, String encryptedSnapshot);
 }

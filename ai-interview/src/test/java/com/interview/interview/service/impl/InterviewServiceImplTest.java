@@ -5,6 +5,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.InterviewStatus;
 import com.interview.common.exception.BusinessException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.ai.audio.AudioPreprocessor;
+import com.interview.ai.factory.AiClientFactory;
+import com.interview.interview.entity.UserResume;
 import com.interview.interview.dto.InterviewDetailResponse;
 import com.interview.interview.dto.InterviewListResponse;
 import com.interview.interview.dto.InterviewStatusResponse;
@@ -12,6 +16,7 @@ import com.interview.interview.entity.Interview;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewQuestionMapper;
 import com.interview.interview.service.InterviewAsyncService;
+import com.interview.interview.service.ResumeService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -48,6 +53,18 @@ class InterviewServiceImplTest {
 
     @Mock
     private InterviewAsyncService interviewAsyncService;
+
+    @Mock
+    private ResumeService resumeService;
+
+    @Mock
+    private AudioPreprocessor audioPreprocessor;
+
+    @Mock
+    private AiClientFactory aiClientFactory;
+
+    @Mock
+    private ObjectMapper objectMapper;
 
     @InjectMocks
     private InterviewServiceImpl interviewService;
@@ -101,13 +118,14 @@ class InterviewServiceImplTest {
                 arg.setId(TEST_INTERVIEW_ID);
                 return 1;
             }).when(interviewMapper).insert(any(Interview.class));
+            stubUploadDependencies();
 
             Long id = interviewService.upload(TEST_USER_ID, audioFile, resumeFile, "JD文本",
                     "面试标题", "阿里巴巴", "Java开发", "互联网", "coding");
 
             assertNotNull(id);
             assertEquals(TEST_INTERVIEW_ID, id);
-            verify(interviewAsyncService).processInterview(anyLong());
+            verify(interviewAsyncService).processInterview(anyLong(), anyString());
         }
 
         @Test
@@ -123,12 +141,13 @@ class InterviewServiceImplTest {
                 arg.setId(TEST_INTERVIEW_ID);
                 return 1;
             }).when(interviewMapper).insert(any(Interview.class));
+            stubUploadDependencies();
 
             Long id = interviewService.upload(TEST_USER_ID, audioFile, resumeFile, "JD文本",
                     null, null, null, null, null);
 
             assertNotNull(id);
-            verify(interviewAsyncService).processInterview(anyLong());
+            verify(interviewAsyncService).processInterview(anyLong(), anyString());
         }
     }
 
@@ -224,11 +243,11 @@ class InterviewServiceImplTest {
         @DisplayName("删除面试成功")
         void delete_Success() {
             when(interviewMapper.selectById(TEST_INTERVIEW_ID)).thenReturn(testInterview);
-            when(interviewMapper.deleteById(TEST_INTERVIEW_ID)).thenReturn(1);
+            when(interviewMapper.moveToRecycleBin(TEST_INTERVIEW_ID, TEST_USER_ID)).thenReturn(1);
 
             interviewService.delete(TEST_INTERVIEW_ID, TEST_USER_ID);
 
-            verify(interviewMapper).deleteById(TEST_INTERVIEW_ID);
+            verify(interviewMapper).moveToRecycleBin(TEST_INTERVIEW_ID, TEST_USER_ID);
         }
 
         @Test
@@ -299,12 +318,14 @@ class InterviewServiceImplTest {
         void retry_Success() {
             testInterview.setStatus(InterviewStatus.FAILED.getCode());
             when(interviewMapper.selectById(TEST_INTERVIEW_ID)).thenReturn(testInterview);
+            when(interviewMapper.claimTask(eq(TEST_INTERVIEW_ID), anyString(), any())).thenReturn(1);
             when(interviewMapper.updateById(any(Interview.class))).thenReturn(1);
+            when(aiClientFactory.snapshotDefault(any())).thenReturn("encrypted-snapshot");
 
             interviewService.retry(TEST_INTERVIEW_ID, TEST_USER_ID);
 
             verify(interviewMapper).updateById(any(Interview.class));
-            verify(interviewAsyncService).processInterview(TEST_INTERVIEW_ID);
+            verify(interviewAsyncService).processInterview(eq(TEST_INTERVIEW_ID), anyString());
         }
 
         @Test
@@ -324,5 +345,15 @@ class InterviewServiceImplTest {
             assertThrows(BusinessException.class,
                     () -> interviewService.retry(TEST_INTERVIEW_ID, 999L));
         }
+    }
+
+    private void stubUploadDependencies() {
+        UserResume resume = new UserResume();
+        resume.setId(10L);
+        resume.setFilePath("resumes/resume.pdf");
+        resume.setParsedText("Java开发经验");
+        when(resumeService.upload(eq(TEST_USER_ID), any())).thenReturn(resume);
+        when(audioPreprocessor.probeDuration(any(Path.class))).thenReturn(60D);
+        when(aiClientFactory.snapshotDefault(any())).thenReturn("encrypted-snapshot");
     }
 }

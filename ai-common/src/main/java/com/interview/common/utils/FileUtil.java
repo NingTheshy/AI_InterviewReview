@@ -16,7 +16,7 @@ import java.util.UUID;
  * 文件工具类
  * <p>
  * 提供音频文件校验、文件名生成、文件保存等功能。
- * 支持 MP3 和 WAV 格式，最大文件大小 200MB。
+ * 支持 MP3 和 WAV 格式，最大文件大小 2GB。
  * </p>
  */
 public class FileUtil {
@@ -30,7 +30,7 @@ public class FileUtil {
 
     private static final Set<String> ALLOWED_AUDIO_EXTENSIONS = Set.of(".mp3", ".wav");
 
-    private static final long MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB
+    public static final long MAX_AUDIO_FILE_SIZE = 2L * 1024 * 1024 * 1024; // 2GB
 
     private static final long MAX_RESUME_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -51,7 +51,7 @@ public class FileUtil {
             throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "音频文件不能为空");
         }
 
-        if (file.getSize() > MAX_FILE_SIZE) {
+        if (file.getSize() > MAX_AUDIO_FILE_SIZE) {
             throw new BusinessException(ErrorCode.AUDIO_FILE_TOO_LARGE.getCode(),
                     ErrorCode.AUDIO_FILE_TOO_LARGE.getMessage());
         }

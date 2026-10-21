@@ -5,6 +5,8 @@ import com.interview.common.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("interview")
@@ -17,6 +19,7 @@ public class Interview extends BaseEntity {
     private String industry;
     private Integer companyTier;
     private String interviewType;
+    private Long resumeId;
     private String audioFilePath;
     private Long audioFileSize;
     private Integer audioDuration;
@@ -36,5 +39,16 @@ public class Interview extends BaseEntity {
     private String weaknesses;
     private Integer status;
     private Integer processingStep;
+    private String processingToken;
+    private LocalDateTime leaseExpiresAt;
+    private LocalDateTime heartbeatAt;
+    private String asrConfigSnapshot;
+    private String llmConfigSnapshot;
+    private String lastErrorCode;
+    private String reanalysisStatus;
+    private String reanalysisError;
+    private LocalDateTime deletedAt;
+    private LocalDateTime purgeAfter;
+    private LocalDateTime purgedAt;
     private String errorMessage;
 }

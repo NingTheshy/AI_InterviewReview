@@ -1,6 +1,6 @@
 # AI 面试复盘系统（后端）
 
-基于 Spring Boot 3 的多模块后端服务。用户上传面试录音、简历和岗位描述后，系统使用 FunASR 完成句子级转写与说话人分离，再使用 Spring AI 驱动的文本模型生成标准答案、逐项比对候选人回答，并输出可回放、可解释的复盘结果。
+基于 Spring Boot 3 的多模块后端服务。用户上传面试录音、简历和岗位描述后，系统通过 Spring AI 模型层调用 FunASR 完成句子级转写与说话人分离，再由 Spring AI 文本模型生成标准答案、逐项比对候选人回答，并输出可回放、可解释的复盘结果。
 
 ## 核心能力
 
@@ -16,9 +16,8 @@
 |---|---|
 | Java | 17 |
 | Spring Boot | 3.5.15 |
-| Spring AI | 1.1.8；DeepSeek 与 OpenAI 兼容协议文本模型适配 |
-| Spring WebFlux | AI 服务 HTTP 客户端 |
-| FunASR（DashScope） | 非实时语音转写与说话人分离 |
+| Spring AI | 1.1.8；统一承载 DeepSeek、MiMo、Whisper 与 FunASR 模型调用 |
+| FunASR（DashScope） | 自定义 Spring AI `TranscriptionModel`，支持非实时转写与说话人分离 |
 | Spring Security | JWT、RBAC、CORS |
 | MyBatis-Plus / Druid | 数据访问与连接池 |
 | MySQL / Redis | 业务数据、Token 黑名单与缓存 |
@@ -31,7 +30,7 @@
 AI_InterviewReview/
 ├── ai-common/       # 公共常量、统一响应、异常、JWT、文件与签名工具
 ├── ai-auth/         # 注册、登录、JWT 过滤器、用户资料与权限
-├── ai-ai/           # Spring AI、FunASR、音频预处理、评分量表与模型工厂
+├── ai-ai/           # Spring AI 模型适配、FunASR、音频预处理、评分量表与模型工厂
 ├── ai-interview/    # 面试上传、异步复盘、笔记、收藏、分享、面经和评论
 ├── ai-admin/        # 用户、面经、评论、面试和统计管理
 ├── ai-web/          # Spring Boot 启动模块与运行配置
@@ -53,31 +52,15 @@ AI_InterviewReview/
 
 ### 1. 初始化数据库
 
-新建数据库直接执行：
+SQL 脚本统一维护为结构与初始化数据两个文件。新建数据库按顺序执行：
 
 ```bash
 mysql -u root -p < sql/schema.sql
+mysql -u root -p ai_interview < sql/data.sql
 ```
 
-已有旧版本数据库按顺序执行相应升级脚本；当前版本涉及以下四项：
-
-```bash
-mysql -u root -p ai_interview < sql/upgrade_rubric_scoring.sql
-mysql -u root -p ai_interview < sql/upgrade_transcript_timestamps_and_notes.sql
-mysql -u root -p ai_interview < sql/upgrade_rbac_v1_5.sql
-mysql -u root -p ai_interview < sql/upgrade_security_p1_v1_6.sql
-```
-
-第二个脚本会新增句子级转写字段，并将笔记唯一范围升级为：
-
-```text
-(interview_id, user_id, note_type, question_id)
-```
-
-第三个脚本把旧 `user.role` 数据迁移到多角色 `user_role`，初始化 20 个权限码及
-`permission_audit_log`。执行前请备份数据库；升级完成后，角色和权限以关联表为唯一来源。
-第四个脚本扩充 AI API Key 密文字段；脚本执行后首次启动会自动把历史明文 Key 迁移为
-带 `enc:v1:` 前缀的 AES-256-GCM 密文。
+`schema.sql` 只包含当前完整表结构，`data.sql` 包含预置角色、20 个权限码、角色权限关系和默认 AI 配置，且可重复执行。
+项目不再保留分散的历史增量脚本。已有数据库升级前必须先备份并与当前 `schema.sql` 做结构差异迁移，不能直接在旧库上重复执行建表脚本；已经处于当前结构的数据库可单独重复执行 `data.sql` 补齐初始化数据。
 
 ### 2. 配置环境变量
 
@@ -173,7 +156,7 @@ FunASR：整段单声道 WAV 转写 + 句子时间戳 + speakerId
 
 ## 验证
 
-当前全量测试结果：**341 tests，0 failures，0 errors**。
+当前全量测试结果：**346 tests，0 failures，0 errors**。
 
 ## License
 

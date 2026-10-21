@@ -4,7 +4,10 @@ import com.interview.common.result.PageResult;
 import com.interview.interview.dto.InterviewDetailResponse;
 import com.interview.interview.dto.InterviewListResponse;
 import com.interview.interview.dto.InterviewStatusResponse;
+import com.interview.interview.dto.SpeakerRoleMappingRequest;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 /**
  * 面试服务接口
@@ -33,6 +36,11 @@ public interface InterviewService {
      * @return 新建面试记录的 ID
      */
     Long upload(Long userId, MultipartFile audioFile, MultipartFile resumeFile,
+                String jdText, String title, String companyName,
+                String positionTitle, String industry, String interviewType);
+
+    /** 使用历史简历或同时上传新简历创建面试；两者至少提供一个。 */
+    Long upload(Long userId, MultipartFile audioFile, Long resumeId, MultipartFile resumeFile,
                 String jdText, String title, String companyName,
                 String positionTitle, String industry, String interviewType);
 
@@ -103,4 +111,13 @@ public interface InterviewService {
      * @throws com.interview.common.exception.BusinessException 面试不存在、无权限或正在处理中
      */
     void retry(Long id, Long userId);
+
+    /** 查询当前用户七天内可恢复的面试。 */
+    List<InterviewListResponse> recycleBin(Long userId);
+
+    /** 恢复尚未到期且未清理的面试。 */
+    void restore(Long id, Long userId);
+
+    /** 更新说话人角色并只重跑问答识别和评分阶段。 */
+    void updateSpeakerRoles(Long id, Long userId, SpeakerRoleMappingRequest request);
 }
