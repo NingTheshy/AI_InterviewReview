@@ -1,9 +1,10 @@
 package com.interview.ai.client;
 
 import com.interview.ai.dto.AsrSentence;
+import com.interview.ai.dto.AsrTranscriptionContext;
 import com.interview.ai.dto.TranscriptionResult;
-import com.interview.ai.model.funasr.FunAsrTranscriptionModel;
-import com.interview.ai.model.funasr.FunAsrTranscriptionOptions;
+import com.interview.ai.model.dashscope.DashScopeFileTranscriptionModel;
+import com.interview.ai.model.dashscope.DashScopeTranscriptionOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -25,10 +26,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class SpringAiFunAsrClientTest {
+class SpringAiDashScopeAsrClientTest {
 
     @Mock
-    private FunAsrTranscriptionModel transcriptionModel;
+    private DashScopeFileTranscriptionModel transcriptionModel;
 
     @TempDir
     Path tempDir;
@@ -40,25 +41,27 @@ class SpringAiFunAsrClientTest {
         TranscriptionResult expected = new TranscriptionResult("测试文本",
                 List.of(new AsrSentence("测试文本", "1", "UNKNOWN", 100, 900)), null);
         AudioTranscriptionResponseMetadata metadata = new AudioTranscriptionResponseMetadata();
-        metadata.put(FunAsrTranscriptionModel.TRANSCRIPTION_RESULT_METADATA_KEY, expected);
+        metadata.put(DashScopeFileTranscriptionModel.TRANSCRIPTION_RESULT_METADATA_KEY, expected);
         when(transcriptionModel.call(org.mockito.ArgumentMatchers.any())).thenReturn(
                 new AudioTranscriptionResponse(new AudioTranscription(expected.text()), metadata));
 
-        SpringAiFunAsrClient client = new SpringAiFunAsrClient(transcriptionModel, "fun-asr");
-        TranscriptionResult actual = client.transcribeDetailed(audio, "zh");
+        SpringAiDashScopeAsrClient client = new SpringAiDashScopeAsrClient(transcriptionModel,
+                DashScopeFileTranscriptionModel.QWEN_MODEL);
+        TranscriptionResult actual = client.transcribeDetailed(audio, "zh", AsrTranscriptionContext.chinese());
 
         assertEquals(expected, actual);
         ArgumentCaptor<AudioTranscriptionPrompt> promptCaptor = ArgumentCaptor.forClass(AudioTranscriptionPrompt.class);
         verify(transcriptionModel).call(promptCaptor.capture());
-        FunAsrTranscriptionOptions options = (FunAsrTranscriptionOptions) promptCaptor.getValue().getOptions();
-        assertEquals("fun-asr", options.getModel());
-        assertEquals("zh", options.getLanguage());
+        DashScopeTranscriptionOptions options = (DashScopeTranscriptionOptions) promptCaptor.getValue().getOptions();
+        assertEquals(DashScopeFileTranscriptionModel.QWEN_MODEL, options.getModel());
+        assertEquals(List.of("zh"), options.context().languageHints());
     }
 
     @Test
     void maxRecommendedDurationComesFromSpringAiModel() {
         when(transcriptionModel.maxRecommendedDuration()).thenReturn(Duration.ofHours(2));
-        SpringAiFunAsrClient client = new SpringAiFunAsrClient(transcriptionModel, "fun-asr");
+        SpringAiDashScopeAsrClient client = new SpringAiDashScopeAsrClient(transcriptionModel,
+                DashScopeFileTranscriptionModel.QWEN_MODEL);
 
         assertEquals(Duration.ofHours(2), client.maxRecommendedDuration());
     }

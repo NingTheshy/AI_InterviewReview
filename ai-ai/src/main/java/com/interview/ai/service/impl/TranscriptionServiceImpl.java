@@ -2,6 +2,7 @@ package com.interview.ai.service.impl;
 
 import com.interview.ai.audio.AudioPreprocessor;
 import com.interview.ai.dto.TranscriptionResult;
+import com.interview.ai.dto.AsrTranscriptionContext;
 import com.interview.ai.factory.AiClientFactory;
 import com.interview.ai.service.AsrClient;
 import com.interview.ai.service.TranscriptionService;
@@ -29,7 +30,7 @@ import java.util.UUID;
  * 支持指定 ASR 配置或使用默认配置。
  * </p>
  * <p>
- * Fun-ASR 等长音频模型使用完整文件异步转写；其他模型由各自客户端处理输入限制。
+ * DashScope 录音文件模型使用完整文件异步转写；其他模型由各自客户端处理输入限制。
  * </p>
  */
 @Slf4j
@@ -48,7 +49,7 @@ public class TranscriptionServiceImpl implements TranscriptionService {
     /**
      * 根据当前 ASR 配置转写本地音频，并尽可能保留结构化转写信息。
      *
-     * <p>完整文件客户端（Fun-ASR）走流式预处理路径，避免把长音频读入堆内存；传统直传客户端
+     * <p>完整文件客户端走流式预处理路径，避免把长音频读入堆内存；传统直传客户端
      * 保持原有 {@link MultipartFile} 调用方式。调用方可统一使用返回对象，兼容只提供纯文本的模型。</p>
      *
      * @param audioFilePath 已保存的音频绝对或相对路径
@@ -58,16 +59,25 @@ public class TranscriptionServiceImpl implements TranscriptionService {
     @Override
     public TranscriptionResult transcribeDetailed(String audioFilePath, Long configId) {
         log.info("开始语音转文字: filePath={}, configId={}", audioFilePath, configId);
-        return transcribeDetailed(audioFilePath, aiClientFactory.getAsrClientByConfigId(configId));
+        return transcribeDetailed(audioFilePath, aiClientFactory.getAsrClientByConfigId(configId),
+                AsrTranscriptionContext.chinese());
     }
 
     @Override
     public TranscriptionResult transcribeDetailedWithSnapshot(String audioFilePath, String encryptedSnapshot) {
         log.info("使用任务配置快照开始语音转文字: filePath={}", audioFilePath);
-        return transcribeDetailed(audioFilePath, aiClientFactory.getAsrClientFromSnapshot(encryptedSnapshot));
+        return transcribeDetailedWithSnapshot(audioFilePath, encryptedSnapshot, AsrTranscriptionContext.chinese());
     }
 
-    private TranscriptionResult transcribeDetailed(String audioFilePath, AsrClient selectedClient) {
+    @Override
+    public TranscriptionResult transcribeDetailedWithSnapshot(String audioFilePath, String encryptedSnapshot,
+                                                              AsrTranscriptionContext context) {
+        log.info("使用任务配置快照和岗位词汇开始语音转文字: filePath={}", audioFilePath);
+        return transcribeDetailed(audioFilePath, aiClientFactory.getAsrClientFromSnapshot(encryptedSnapshot), context);
+    }
+
+    private TranscriptionResult transcribeDetailed(String audioFilePath, AsrClient selectedClient,
+                                                    AsrTranscriptionContext context) {
 
         Path path = Paths.get(audioFilePath);
         if (!Files.exists(path)) {
@@ -78,10 +88,10 @@ public class TranscriptionServiceImpl implements TranscriptionService {
         try {
             AsrClient client = selectedClient;
 
-            // Fun-ASR 等长音频异步模型必须以完整文件提交。此分支必须在读取全部字节之前执行，
+            // DashScope 长音频异步模型必须以完整文件提交。此分支必须在读取全部字节之前执行，
             // 避免将数百 MB 甚至 GB 级音频载入 JVM 堆内存。
             if (client instanceof WholeFileAsrClient wholeFileClient) {
-                return transcribeWholeFile(path, wholeFileClient, "zh");
+                return transcribeWholeFile(path, wholeFileClient, "zh", context);
             }
 
             byte[] audioBytes = Files.readAllBytes(path);
@@ -107,13 +117,14 @@ public class TranscriptionServiceImpl implements TranscriptionService {
     }
 
     /**
-     * 将长音频预处理为 Fun-ASR 所需的单声道 WAV 后整体提交。
+     * 将长音频预处理为 DashScope 说话人分离所需的单声道 WAV 后整体提交。
      *
      * <p>临时文件必须在所有成功、失败和中断路径中清理；音频时长以预处理结果计算，确保与实际
      * 上传给模型的文件一致。</p>
      */
-    private TranscriptionResult transcribeWholeFile(Path source, WholeFileAsrClient client, String language) {
-        Path preparedAudio = source.resolveSibling(".funasr-" + UUID.randomUUID() + ".wav");
+    private TranscriptionResult transcribeWholeFile(Path source, WholeFileAsrClient client, String language,
+                                                    AsrTranscriptionContext context) {
+        Path preparedAudio = source.resolveSibling(".dashscope-asr-" + UUID.randomUUID() + ".wav");
         try {
             double durationSeconds = audioPreprocessor.preprocessToMonoWav(source, preparedAudio);
             Duration maxDuration = client.maxRecommendedDuration();
@@ -123,7 +134,7 @@ public class TranscriptionServiceImpl implements TranscriptionService {
                                 + Math.round(durationSeconds / 60.0) + " 分钟");
             }
 
-            TranscriptionResult result = client.transcribeDetailed(preparedAudio, language)
+            TranscriptionResult result = client.transcribeDetailed(preparedAudio, language, context)
                     .withAudioDurationSeconds((int) Math.ceil(durationSeconds));
             log.info("完整音频转写完成: 文件={}, 文本长度={}, 句子数={}",
                     source.getFileName(), result.text().length(), result.sentences().size());
@@ -132,7 +143,7 @@ public class TranscriptionServiceImpl implements TranscriptionService {
             try {
                 Files.deleteIfExists(preparedAudio);
             } catch (IOException e) {
-                log.warn("清理 Fun-ASR 临时单声道音频失败: {}", preparedAudio, e);
+                log.warn("清理 DashScope ASR 临时单声道音频失败: {}", preparedAudio, e);
             }
         }
     }

@@ -1,7 +1,7 @@
 package com.interview.interview.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.interview.ai.config.FunAsrProperties;
+import com.interview.ai.config.DashScopeAsrProperties;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.service.FileService.FileDownload;
@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 
 class FileServiceImplTest {
     private final InterviewMapper mapper = mock(InterviewMapper.class);
-    private final FunAsrProperties properties = mock(FunAsrProperties.class);
+    private final DashScopeAsrProperties properties = mock(DashScopeAsrProperties.class);
     private final FileServiceImpl service = new FileServiceImpl(mapper, properties);
     private Path directory;
 

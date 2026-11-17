@@ -6,7 +6,7 @@
 
 > 评分实现更新：本文后续关于阶梯制评分和 `SCORING_TWO_PHASE` 的描述属于旧版本。当前处理流程为“识别问答 → 生成满分答案与量表 → 逐项比对 → 服务端计分 → 整场汇总”，以根目录 `README.md` 和 `RubricScoringService` 为准。数据库完整结构以 `sql/schema.sql` 为准。
 
-> AI 技术栈更新：所有生产文本模型均通过 Spring AI `ChatModel` 调用；ASR 仅保留 FunASR，并通过项目自定义的 Spring AI `TranscriptionModel` 接入 DashScope。Whisper 和旧 WebFlux 模型客户端均已删除。
+> AI 技术栈更新：文本模型只保留 DeepSeek，并通过 Spring AI `ChatModel` 调用；ASR provider 统一为 DashScope，自定义 Spring AI `TranscriptionModel` 支持千问 Audio 3.1 主模型和 Paraformer-v2 备选模型。FunASR 仅表示模型集合，不是具体模型。
 
 > 面试闭环更新：简历改为 `/resumes` 独立异步解析；面试创建只传 `resumeId`。音频上限为 2GB/2 小时。任务支持取消、阶段重试、重评与租约接管；私密分享已移除，统一使用 `/interviews/{id}/publication` 和 `/experiences/{id}` 公开面经接口。后续旧章节若冲突，以本段、README 和当前源码为准。
 
@@ -38,7 +38,7 @@
 |------|------|------|
 | Java | 17 LTS | 编程语言 |
 | Spring Boot | 3.5.15 | 后端框架 |
-| Spring AI | 1.1.8 | DeepSeek、MiMo 与 FunASR 的统一模型调用层 |
+| Spring AI | 1.1.8 | DeepSeek 与 DashScope ASR 的统一模型调用层 |
 | Spring Security | 6.2.x | 安全认证 |
 | MyBatis-Plus | 3.5.5 | ORM 框架 |
 | MySQL | 8.0+ | 关系型数据库 |
@@ -139,7 +139,7 @@ source /path/to/AI_InterviewReview/sql/data.sql
 **初始化数据脚本自动完成：**
 - 初始化角色数据（admin、user）
 - 初始化 20 项权限及角色权限关系
-- 初始化默认 AI 配置（DeepSeek、FunASR、MiMo）
+- 初始化默认 AI 配置（DeepSeek Flash、千问 Audio 3.1、Paraformer-v2）
 - 不创建固定密码的管理员账号；首个管理员由 `RBAC_BOOTSTRAP_ADMIN_*` 环境变量安全引导创建
 
 ### 2.5 第四步：配置修改
@@ -158,9 +158,8 @@ source /path/to/AI_InterviewReview/sql/data.sql
 | `REDIS_PASSWORD` | Redis 密码 | - | 是 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 生产环境必填 |
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | - | 是 |
-| `XIAOMI_API_KEY` | 小米 MiMo API 密钥 | - | 否 |
-| `OPENAI_API_KEY` | OpenAI API 密钥 | - | 否 |
-| `FFMPEG_PATH` | FFmpeg 可执行文件路径 | ffmpeg | 否 |
+| `DASHSCOPE_API_KEY` | 阿里云百炼 API 密钥 | - | 是 |
+| `DASHSCOPE_ASR_FFMPEG_PATH` | FFmpeg 可执行文件路径 | ffmpeg | 否 |
 | `SCORING_TWO_PHASE` | 启用双阶段评分模式 | false | 否 |
 
 **配置方式（Windows）：**
@@ -183,8 +182,7 @@ source ~/.bashrc
 | 服务 | 用途 | 获取方式 |
 |------|------|---------|
 | DeepSeek | 文本分析与评分 | https://platform.deepseek.com/ |
-| 小米 MiMo | LLM + ASR（可选） | https://xiaoai.mi.com/ |
-| 阿里云 DashScope | ASR（可选） | https://dashscope.aliyun.com/ |
+| 阿里云 DashScope | 千问 Audio 3.1 / Paraformer-v2 ASR | https://dashscope.aliyun.com/ |
 
 ### 2.6 第五步：编译构建
 
@@ -322,34 +320,20 @@ ai:
   providers:
     deepseek:
       api-key: ${DEEPSEEK_API_KEY}
-      api-endpoint: https://api.deepseek.com/v1
-      model-name: deepseek-chat
+      api-endpoint: https://api.deepseek.com
+      model-name: deepseek-flash
       timeout-seconds: 600            # LLM 调用超时 10 分钟
-    xiaomi:
-      api-key: ${XIAOMI_API_KEY}
-      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
-      model-name: mimo-v2.5-pro
-    xiaomi-asr:
-      api-key: ${XIAOMI_API_KEY}
-      api-endpoint: https://token-plan-cn.xiaomimimo.com/v1
-      model-name: mimo-v2.5-asr
-    funasr:
-      api-key: ${FUNASR_API_KEY}
-      api-endpoint: ${FUNASR_API_ENDPOINT:https://dashscope.aliyuncs.com/api/v1}
-      model-name: paraformer-v2
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+      api-endpoint: https://dashscope.aliyuncs.com/api/v1
+      model-name: qwen-audio-3.1-asr-flash-filetrans
 
-  # 音频分片转录配置
-  chunk:
-    max-direct-size: 6291456          # 6MB，小于该值直传 ASR
-    min-segment-duration: 30          # 最小片段时长（秒）
-    max-segment-duration: 180         # 最大片段时长（秒），约 5.76MB
-    min-silence-duration: 1.0         # 最小静音间隙（秒）
-    overlap-duration: 1.5             # 重叠窗口（秒）
-    silence-threshold: 300.0          # 静音检测 RMS 阈值
-    concurrency: 2                    # 并发发送窗口
-    max-retries: 3                    # 单片段最大重试次数
-    timeout-seconds: 30               # 单次 ASR 请求超时
-    ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
+  dashscope-asr:
+    file-source-mode: TEMPORARY_UPLOAD
+    diarization-enabled: true
+    speaker-count: 2
+    max-diarization-duration-minutes: 120
+    paraformer-vocabulary-id: ${DASHSCOPE_PARAFORMER_VOCABULARY_ID:}
 
   # 评分模式配置
   scoring:
@@ -497,7 +481,7 @@ InterviewAsyncServiceImpl.processInterview(interviewId)
     │
     ├── Step 1: 语音转文字 (processingStep=1)
     │   └── TranscriptionService.transcribeDetailed(audioPath, configId)
-    │       └── 整段音频 → 单声道 WAV → Spring AI FunASR 模型 → 句子时间戳与 speakerId
+    │       └── 整段音频 → 单声道 WAV → DashScope ASR → 句子/词时间戳与 speakerId
     │
     ├── Step 1.5: 公司分级
     │   └── CompanyClassifier.classify(companyName, industry, jdText)
@@ -524,7 +508,7 @@ InterviewAsyncServiceImpl.processInterview(interviewId)
     └── Step 4: 完成 (status=COMPLETED)
 ```
 
-### 6.3 FunASR 整段转录流程
+### 6.3 DashScope 整段转录流程
 
 ```
 原始音频文件
@@ -536,13 +520,13 @@ TranscriptionServiceImpl.transcribe()
 AudioPreprocessor.preprocessToMonoWav()
     │  转为模型支持的单声道 WAV，不进行固定分片
     ▼
-SpringAiFunAsrClient
+SpringAiDashScopeAsrClient
     ▼
-FunAsrTranscriptionModel (Spring AI TranscriptionModel)
+DashScopeFileTranscriptionModel (Spring AI TranscriptionModel)
     ├── 生成 HMAC 短时音频 URL
     ├── 提交 DashScope 异步转写任务
     ├── 轮询任务并下载结果
-    └── 在 Spring AI 响应元数据中保留句子时间戳和 speakerId
+    └── 在 Spring AI 响应元数据中保留句子/词时间戳和 speakerId
     ▼
 TranscriptionResult（文本 + 句子列表 + 音频时长）
 ```
@@ -713,7 +697,7 @@ if (interview.getStatus() == InterviewStatus.PROCESSING.getCode()) {
 
 本节仅保留旧 MiMo-ASR 分片问题的演进记录。当前生产路径不再包含
 `AudioSplitter`、`ReliableSender`、`TextMerger` 或 `AudioChunkProperties`，以 6.3 节的
-Spring AI FunASR 整段转写流程为准。
+Spring AI DashScope 整段转写流程为准。
 
 #### 问题描述
 
@@ -799,11 +783,8 @@ AiClientConfig (@Bean 初始化)
     │
     ├── "deepseek" -> SpringAiDeepSeekLlmClient
     │                  └── Spring AI DeepSeekChatModel
-    ├── "xiaomi"   -> SpringAiOpenAiCompatibleLlmClient
-    │                  └── Spring AI OpenAiChatModel
-    │                  └── Spring AI OpenAiAudioTranscriptionModel
-    └── "funasr"   -> SpringAiFunAsrClient
-                       └── 自定义 Spring AI FunAsrTranscriptionModel
+    └── "dashscope" -> SpringAiDashScopeAsrClient
+                         └── 自定义 Spring AI DashScopeFileTranscriptionModel
     │
     ▼
 TranscriptionService / ScoringService / CompanyClassifier
@@ -820,9 +801,8 @@ LlmClient.call() / AsrClient.transcribe()
 | AiClientFactory | `ai-ai/.../factory/AiClientFactory.java` | AI 客户端工厂 |
 | AiClientConfig | `ai-ai/.../config/AiClientConfig.java` | 客户端注册配置 |
 | SpringAiDeepSeekLlmClient | `ai-ai/.../client/SpringAiDeepSeekLlmClient.java` | Spring AI DeepSeek 文本模型适配器（含重试） |
-| SpringAiOpenAiCompatibleLlmClient | `ai-ai/.../client/SpringAiOpenAiCompatibleLlmClient.java` | Spring AI OpenAI 兼容文本模型适配器，用于 MiMo 等模型 |
-| SpringAiFunAsrClient | `ai-ai/.../client/SpringAiFunAsrClient.java` | 业务 ASR 契约到 Spring AI 的适配器 |
-| FunAsrTranscriptionModel | `ai-ai/.../model/funasr/FunAsrTranscriptionModel.java` | Spring AI 自定义 FunASR 模型，保留句子时间戳与说话人元数据 |
+| SpringAiDashScopeAsrClient | `ai-ai/.../client/SpringAiDashScopeAsrClient.java` | 业务 ASR 契约到 Spring AI 的适配器 |
+| DashScopeFileTranscriptionModel | `ai-ai/.../model/dashscope/DashScopeFileTranscriptionModel.java` | 千问 Audio 3.1 / Paraformer-v2 模型，保留句子/词时间戳与说话人元数据 |
 | AudioPreprocessor | `ai-ai/.../audio/AudioPreprocessor.java` | 音频预处理器 |
 | StructuredOutputInvoker | `ai-ai/.../util/StructuredOutputInvoker.java` | LLM 调用工具（重试+JSON修复） |
 | ScoringServiceImpl | `ai-ai/.../service/impl/ScoringServiceImpl.java` | 评分服务实现 |
@@ -903,45 +883,13 @@ overallScore = (int) Math.round(
 
 **注意**：`overallScore` 由后端使用加权公式计算，不使用 LLM 返回的值，确保评分一致性。
 
-### 8.6 如何添加新的 AI 模型
+### 8.6 如何切换 ASR 备选模型
 
-**第一步：在 application.yml 中注册 provider**
+LLM 只保留 DeepSeek，不开放其他文本 provider。ASR provider 固定为 `dashscope`，管理员可在已测试成功的两个配置间切换默认项：
 
-```yaml
-ai:
-  providers:
-    qwen:
-      api-key: ${QWEN_API_KEY}
-      api-endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1
-      model-name: qwen-plus
-      timeout-seconds: 300
-```
-
-**第二步：在 AiClientConfig 中添加 Bean**
-
-```java
-@Bean
-public LlmClient qwenLlmClient() {
-    AiProviderProperties props = aiProperties.getProvider("qwen");
-    if (props == null || isPlaceholderApiKey(props.getApiKey())) {
-        log.warn("未配置 qwen LLM，跳过注册");
-        return null;
-    }
-    SpringAiOpenAiCompatibleLlmClient client = new SpringAiOpenAiCompatibleLlmClient(props);
-    client.setCallTimeout(Duration.ofSeconds(props.getTimeoutSeconds()));
-    aiClientFactory.registerLlmClient("qwen", client);
-    return client;
-}
-```
-
-**第三步：在 ai_config 表中插入配置记录**
-
-```sql
-INSERT INTO ai_config (config_name, provider, model_name, api_endpoint, config_type, is_default)
-VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 2, 0);
-```
-
-**第四步：重启应用**
+1. 主模型：`qwen-audio-3.1-asr-flash-filetrans`，使用即时热词和岗位上下文。
+2. 备选模型：`paraformer-v2`，可通过 `DASHSCOPE_PARAFORMER_VOCABULARY_ID` 绑定预编译热词表。
+3. 两个模型都必须先通过管理端连接测试，才能设为默认；切换不会影响已保存配置快照的运行中任务。
 
 ---
 
@@ -988,7 +936,9 @@ VALUES ('通义千问文本分析', 'qwen', 'qwen-plus', 'https://dashscope.aliy
 | POST | /auth/login | 用户登录 | 否 |
 | POST | /auth/logout | 退出登录 | 是 |
 | GET | /auth/profile | 获取用户信息 | 是 |
-| PUT | /auth/profile | 更新用户信息 | 是 |
+| PUT | /auth/profile | 更新昵称，不接受头像 URL | 是 |
+| POST | /auth/profile/avatar | 上传本人头像，JPG/PNG 不超过 5 MB | 是 |
+| GET | /avatars/{filename} | 公开读取系统生成的头像图片 | 否 |
 | PUT | /auth/password | 修改密码 | 是 |
 
 ### 9.2 面试模块 (ai-interview)
@@ -1210,7 +1160,7 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 检查项：
 1. 非 WAV 格式音频需要 FFmpeg
 2. 系统会自动搜索 FFmpeg 路径，大多数情况无需手动配置
-3. 如果自动搜索失败，设置环境变量 `FFMPEG_PATH` 或在 `application.yml` 中配置 `ai.chunk.ffmpeg-path`
+3. 如果自动搜索失败，设置 `DASHSCOPE_ASR_FFMPEG_PATH` 或配置 `ai.dashscope-asr.ffmpeg-path`
 
 ---
 
@@ -1222,13 +1172,13 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 
 | 功能 | 说明 | 涉及文件 |
 |------|------|---------|
-| FunASR 整段转写 | 单声道 WAV → 公网签名 URL → 异步 ASR，保留时间戳与说话人 | `AudioPreprocessor`, `FunAsrTranscriptionModel` |
+| DashScope 整段转写 | 单声道 WAV → 公网签名 URL → 异步 ASR，保留句子/词时间戳与说话人 | `AudioPreprocessor`, `DashScopeFileTranscriptionModel` |
 | 阶梯制评分 | LLM 输出分类而非分数，提高准确性 | `ScoringServiceImpl` |
 | 证据锚定 | 每个评分维度必须引用原文 | `ScoringServiceImpl` |
 | 双阶段评估 | 分析 → 评分分离，可选高精度模式 | `ScoringServiceImpl`, `InterviewAsyncServiceImpl` |
 | LLM 问题识别 | 语义识别 QA 对，替代正则拆分 | `ScoringServiceImpl` |
-| LLM 调用重试 | 3 次重试，指数退避 | `SpringAiDeepSeekLlmClient`, `SpringAiOpenAiCompatibleLlmClient` |
-| ASR 超时保护 | FunASR 请求超时与签名 URL 总截止时间 | `FunAsrTranscriptionModel` |
+| LLM 调用重试 | 3 次重试，指数退避 | `SpringAiDeepSeekLlmClient` |
+| ASR 超时保护 | DashScope 请求超时与签名 URL 总截止时间 | `DashScopeFileTranscriptionModel` |
 | LLM 超时可配置 | 通过 `timeout-seconds` 配置 | `AiProviderProperties`, `AiClientConfig` |
 | PROCESSING 可重试 | 卡住的记录允许强制重试 | `InterviewServiceImpl` |
 
@@ -1239,7 +1189,7 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 | 评分不准确 | LLM 直接输出 0-100 分数不稳定 | 阶梯制评分 + 证据锚定 | `ScoringServiceImpl` |
 | 评分超时 | 早期 HTTP 调用无超时 + chunk 太大 | Spring AI 调用 timeout + chunk 5000 | `SpringAiDeepSeekLlmClient`, `ScoringServiceImpl` |
 | 只识别 1 个问题 | 正则拆分在 ASR 文本上失效 | LLM 语义识别 | `ScoringServiceImpl` |
-| 旧分片转录文本丢失 | 分片合并误裁 | 移除旧 MiMo-ASR 分片链路，改为 FunASR 整段转写 | `FunAsrTranscriptionModel`, `TranscriptionServiceImpl` |
+| 旧分片转录文本丢失 | 分片合并误裁 | 移除旧 MiMo-ASR 分片链路，改为 DashScope 整段转写 | `DashScopeFileTranscriptionModel`, `TranscriptionServiceImpl` |
 | 重试仅限失败状态 | 状态检查过严 | 放宽为任意状态可重试 | `InterviewServiceImpl` |
 
 ### v1.0 (2026-06-03)
@@ -1290,9 +1240,8 @@ java -jar ai-web/target/ai-web-1.0.0-SNAPSHOT.jar \
 | ai-ai/.../config/AiClientConfig.java | 客户端注册配置 |
 | ai-ai/.../config/AiProviderProperties.java | AI 提供商配置属性 |
 | ai-ai/.../client/SpringAiDeepSeekLlmClient.java | Spring AI DeepSeek 客户端（含重试） |
-| ai-ai/.../client/SpringAiOpenAiCompatibleLlmClient.java | Spring AI MiMo/OpenAI 兼容客户端 |
-| ai-ai/.../client/SpringAiFunAsrClient.java | FunASR 业务适配器 |
-| ai-ai/.../model/funasr/FunAsrTranscriptionModel.java | 自定义 Spring AI FunASR 转写模型 |
+| ai-ai/.../client/SpringAiDashScopeAsrClient.java | DashScope ASR 业务适配器 |
+| ai-ai/.../model/dashscope/DashScopeFileTranscriptionModel.java | 自定义 Spring AI DashScope 转写模型 |
 | ai-ai/.../audio/AudioPreprocessor.java | 音频预处理器 |
 | ai-ai/.../audio/FfmpegResolver.java | FFmpeg 路径探测器 |
 | ai-ai/.../audio/AudioChunk.java | 音频片段数据类 |

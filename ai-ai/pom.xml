@@ -32,12 +32,6 @@
             <artifactId>spring-ai-deepseek</artifactId>
         </dependency>
 
-        <!-- DeepSeek、MiMo 等 OpenAI 兼容文本模型 -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-openai</artifactId>
-        </dependency>
-
         <!-- Test Dependencies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

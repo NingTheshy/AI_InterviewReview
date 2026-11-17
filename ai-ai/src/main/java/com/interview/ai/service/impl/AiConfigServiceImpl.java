@@ -3,6 +3,7 @@ package com.interview.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.ai.entity.AiConfig;
+import com.interview.ai.config.AiProviderPolicy;
 import com.interview.ai.mapper.AiConfigMapper;
 import com.interview.ai.security.AiConfigSecretCipher;
 import com.interview.ai.factory.AiClientFactory;
@@ -26,7 +27,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.net.URI;
 import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
@@ -206,8 +206,9 @@ public class AiConfigServiceImpl implements AiConfigService {
         config.setIsDefault(1);
         aiConfigMapper.updateById(config);
         auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "AI_CONFIG_SET_DEFAULT", "AI_CONFIG",
-                String.valueOf(id), Map.of("isDefault", beforeDefault == null ? 0 : beforeDefault),
-                Map.of("isDefault", 1));
+                String.valueOf(id), Map.of("isDefault", beforeDefault == null ? 0 : beforeDefault,
+                        "configName", config.getConfigName()),
+                Map.of("isDefault", 1, "configName", config.getConfigName()));
 
         log.info("设置默认 AI 配置: id={}, type={}", id, config.getConfigType());
     }
@@ -227,7 +228,7 @@ public class AiConfigServiceImpl implements AiConfigService {
                     throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "配置测试音频不能超过20MB");
                 }
                 String suffix = audioSample.getOriginalFilename().toLowerCase().endsWith(".mp3") ? ".mp3" : ".wav";
-                Path temp = Files.createTempFile("funasr-config-test-", suffix);
+                Path temp = Files.createTempFile("dashscope-asr-config-test-", suffix);
                 try {
                     audioSample.transferTo(temp);
                     AsrClient client = clientFactory.getAsrClientByConfigId(id);
@@ -237,7 +238,7 @@ public class AiConfigServiceImpl implements AiConfigService {
                     if (transcript == null || transcript.isBlank()) {
                         throw new IllegalStateException("模型返回空转写");
                     }
-                    message = "FunASR配置测试成功";
+                    message = "DashScope ASR 配置测试成功";
                 } finally {
                     Files.deleteIfExists(temp);
                 }
@@ -276,22 +277,8 @@ public class AiConfigServiceImpl implements AiConfigService {
                 || config.getModelName() == null || config.getModelName().isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "配置类型、供应商和模型名称不能为空");
         }
-        String provider = config.getProvider().trim().toLowerCase();
-        if (config.getConfigType() == ConfigType.ASR.getCode() && !"funasr".equals(provider)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "ASR仅支持funasr");
-        }
-        if (config.getConfigType() == ConfigType.LLM.getCode()
-                && !java.util.Set.of("deepseek", "xiaomi").contains(provider)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "文本模型仅支持deepseek或xiaomi");
-        }
-        try {
-            URI endpoint = URI.create(config.getApiEndpoint());
-            if (!java.util.Set.of("http", "https").contains(endpoint.getScheme()) || endpoint.getHost() == null) {
-                throw new IllegalArgumentException();
-            }
-        } catch (Exception e) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "API端点必须是有效的HTTP(S)地址");
-        }
+        AiProviderPolicy.validate(config.getConfigType(), config.getProvider(), config.getModelName(),
+                config.getApiEndpoint());
     }
 
     private String fingerprint(AiConfig config, String plainKey) {

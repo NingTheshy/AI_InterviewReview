@@ -81,23 +81,25 @@ WHERE r.`role_name` = 'admin';
 -- -----------------------------------------------------------
 INSERT INTO `ai_config`
     (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `test_status`, `sort_order`)
-SELECT 'DeepSeek 文本分析', 'deepseek', 'deepseek-chat', 'https://api.deepseek.com/v1', 2, 0, 0, 1
+SELECT 'DeepSeek Flash 文本分析', 'deepseek', 'deepseek-flash', 'https://api.deepseek.com', 2, 0, 0, 1
 WHERE NOT EXISTS (
-    SELECT 1 FROM `ai_config` WHERE `config_name` = 'DeepSeek 文本分析' AND `deleted` = 0
+    SELECT 1 FROM `ai_config` WHERE `config_name` = 'DeepSeek Flash 文本分析' AND `deleted` = 0
 );
 
 INSERT INTO `ai_config`
     (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `test_status`, `sort_order`)
-SELECT 'FunASR 语音识别', 'funasr', 'fun-asr', 'https://dashscope.aliyuncs.com/api/v1', 1, 0, 0, 1
+SELECT '千问 Audio 3.1 录音识别', 'dashscope', 'qwen-audio-3.1-asr-flash-filetrans',
+       'https://dashscope.aliyuncs.com/api/v1', 1, 0, 0, 1
 WHERE NOT EXISTS (
-    SELECT 1 FROM `ai_config` WHERE `config_name` = 'FunASR 语音识别' AND `deleted` = 0
+    SELECT 1 FROM `ai_config` WHERE `config_name` = '千问 Audio 3.1 录音识别' AND `deleted` = 0
 );
 
 INSERT INTO `ai_config`
     (`config_name`, `provider`, `model_name`, `api_endpoint`, `config_type`, `is_default`, `test_status`, `sort_order`)
-SELECT '小米 MIMO-V2.5 文本分析', 'xiaomi', 'mimo-v2.5', 'https://token-plan-cn.xiaomimimo.com', 2, 0, 0, 2
+SELECT 'Paraformer-v2 录音识别（备选）', 'dashscope', 'paraformer-v2',
+       'https://dashscope.aliyuncs.com/api/v1', 1, 0, 0, 2
 WHERE NOT EXISTS (
-    SELECT 1 FROM `ai_config` WHERE `config_name` = '小米 MIMO-V2.5 文本分析' AND `deleted` = 0
+    SELECT 1 FROM `ai_config` WHERE `config_name` = 'Paraformer-v2 录音识别（备选）' AND `deleted` = 0
 );
 
 COMMIT;

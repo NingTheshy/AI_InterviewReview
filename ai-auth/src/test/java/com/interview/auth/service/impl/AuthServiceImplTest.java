@@ -5,6 +5,7 @@ import com.interview.auth.dto.*;
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
 import com.interview.auth.service.RbacService;
+import com.interview.auth.service.AvatarStorageService;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.UserStatus;
 import com.interview.common.exception.BusinessException;
@@ -51,6 +52,9 @@ class AuthServiceImplTest {
 
     @Mock
     private RbacService rbacService;
+
+    @Mock
+    private AvatarStorageService avatarStorageService;
 
     @InjectMocks
     private AuthServiceImpl authService;
@@ -523,7 +527,6 @@ class AuthServiceImplTest {
         void updateProfile_Success() {
             UpdateProfileRequest request = new UpdateProfileRequest();
             request.setNickname("新昵称");
-            request.setAvatar("https://example.com/avatar.jpg");
 
             when(userMapper.selectById(TEST_USER_ID)).thenReturn(testUser);
             when(userMapper.updateById(any(User.class))).thenReturn(1);
@@ -532,7 +535,7 @@ class AuthServiceImplTest {
 
             verify(userMapper).updateById(any(User.class));
             assertEquals("新昵称", testUser.getNickname());
-            assertEquals("https://example.com/avatar.jpg", testUser.getAvatar());
+            assertNull(testUser.getAvatar());
         }
 
         @Test

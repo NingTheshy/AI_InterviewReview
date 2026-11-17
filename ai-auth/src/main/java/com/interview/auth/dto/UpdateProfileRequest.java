@@ -1,5 +1,6 @@
 package com.interview.auth.dto;
 
+import jakarta.validation.constraints.Null;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -16,8 +17,8 @@ public class UpdateProfileRequest {
     private String nickname;
 
     /**
-     * 头像 URL（可选）
+     * 旧客户端的头像字段；只允许通过专用上传接口修改。
      */
-    @Size(max = 500, message = "头像链接不能超过 500 个字符")
+    @Null(message = "请通过头像上传接口修改头像")
     private String avatar;
 }

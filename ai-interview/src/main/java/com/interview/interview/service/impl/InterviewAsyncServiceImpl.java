@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.interview.ai.dto.AsrSentence;
+import com.interview.ai.dto.AsrTranscriptionContext;
 import com.interview.ai.dto.TranscriptionResult;
 import com.interview.ai.service.CompanyClassifier;
 import com.interview.ai.service.ScoringService;
@@ -37,7 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 面试复盘的异步编排器。
  *
- * <p>该类只负责推进状态机和持久化各阶段产物，不在此处实现具体模型策略。处理顺序为：Fun-ASR
+ * <p>该类只负责推进状态机和持久化各阶段产物，不在此处实现具体模型策略。处理顺序为：DashScope ASR
  * 结构化转写、公司分级、标准答案与逐项比对、评分结果落库。任一阶段失败都会将面试标记为失败，
  * 以便前端轮询状态并允许用户重试。</p>
  */
@@ -107,8 +108,11 @@ public class InterviewAsyncServiceImpl implements InterviewAsyncService {
             } else {
                 updateStep(interview, 1, processingToken);
                 String audioPath = Paths.get(uploadDir, interview.getAudioFilePath()).toString();
+                AsrTranscriptionContext asrContext = AsrTranscriptionContext.forInterview(
+                        interview.getPositionTitle(), interview.getIndustry(), interview.getJdText(), null);
                 transcription = withLeaseRenewal(interviewId, processingToken, () ->
-                        transcriptionService.transcribeDetailedWithSnapshot(audioPath, interview.getAsrConfigSnapshot()));
+                        transcriptionService.transcribeDetailedWithSnapshot(
+                                audioPath, interview.getAsrConfigSnapshot(), asrContext));
                 String transcript = transcription.text();
                 if (transcript == null || transcript.isBlank()) {
                     throw new BusinessException(ErrorCode.PROCESSING_FAILED.getCode(),

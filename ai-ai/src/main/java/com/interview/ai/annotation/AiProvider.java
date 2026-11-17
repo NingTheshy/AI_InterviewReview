@@ -21,7 +21,7 @@ import java.lang.annotation.*;
 public @interface AiProvider {
 
     /**
-     * 提供商名称（如 "funasr", "deepseek", "openai"）
+     * 提供商名称（如 "dashscope", "deepseek"）
      */
     String provider();
 

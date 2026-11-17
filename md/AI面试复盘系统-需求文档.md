@@ -11,7 +11,7 @@
 - `POST /resumes` 创建 `PROCESSING` 记录并异步解析；同一用户的相同 PDF 按 SHA-256 复用未隐藏记录，失败可重试。
 - `POST /interviews/upload` 必填音频、非空 JD、`resumeId`、岗位和合法面试类型；公司、行业、标题选填，标题按“公司-岗位-日期”或“岗位-日期”生成。
 - 每个用户最多一场 AI 处理中面试；取消保留阶段产物，`retry` 仅用于失败或取消，`reanalyze` 仅用于已完成面试且不再调用 ASR。
-- 长转写按 FunASR 句子及时间戳以有限重叠窗口分块，跨块结果按时间范围和文本指纹去重。
+- 长转写按 DashScope ASR 句子及时间戳以有限重叠窗口分块，跨块结果按时间范围和文本指纹去重。
 - 技术/客观题标准答案不读取简历；个人/项目/行为题必须读取面试绑定简历，并按用户、面试、简历版本、模型和提示词版本隔离缓存。
 - 重评按问题指纹和时间范围保留匹配问题 ID；未匹配旧问题归档，从而保留问题笔记与收藏。
 - 面经只展示题目、分数、关键差距、改进建议、标准答案、昵称和头像，不展示回答、转写、音频、简历或私人笔记。
@@ -258,7 +258,7 @@ ai-web → ai-interview → ai-common
 
 ```
 上传完成 → 创建记录(status=PROCESSING) → 异步处理：
-  Step 1: FunASR 转写 + 句子时间戳 + 说话人角色映射 (processing_step=1)
+  Step 1: DashScope ASR 转写 + 句子/词时间戳 + 说话人角色映射 (processing_step=1)
   Step 2: 识别问答对 + 生成/复用标准满分回答和评分量表 + 逐项比对 (processing_step=2)
   Step 3: 服务端计算逐题分数、各维度分数并持久化评分明细 (processing_step=3)
   Step 4: 汇总整体评分、优势、不足和改进建议 (processing_step=4)
@@ -406,13 +406,13 @@ ai-web → ai-interview → ai-common
 | 配置项 | 说明 |
 |--------|------|
 | provider | 模型提供商（openai/deepseek/aliyun/baidu等） |
-| modelName | 模型名称（gpt-4o/deepseek-chat/qwen-turbo等） |
+| modelName | 模型名称（deepseek-flash、qwen-audio-3.1-asr-flash-filetrans、paraformer-v2） |
 | apiKey | API 密钥（加密存储） |
 | isDefault | 是否默认模型 |
 
 可为不同步骤配置不同模型：
-- 语音转文字：仅使用 DashScope FunASR
-- 文本分析和评分：使用 Spring AI 接入 DeepSeek / MiMo
+- 语音转文字：使用 DashScope，主模型为 `qwen-audio-3.1-asr-flash-filetrans`，备选为 `paraformer-v2`
+- 文本分析和评分：仅使用 Spring AI 接入 DeepSeek Flash
 
 ### 3.7 管理员模块
 
@@ -483,8 +483,12 @@ ai-web → ai-interview → ai-common
 | POST | `/auth/login` | 公开 | 校验账号有效状态 |
 | POST | `/auth/logout` | 登录校验 | 仅注销当前令牌 |
 | GET | `/auth/profile` | 登录校验 | 作为前端角色及权限状态的统一数据来源 |
-| PUT | `/auth/profile` | 登录校验 | 只能修改本人资料 |
+| PUT | `/auth/profile` | 登录校验 | 只能修改本人昵称，禁止提交头像 URL |
+| POST | `/auth/profile/avatar` | 登录校验 | 只能上传本人头像；JPG/PNG、最大 5 MB，统一裁成 256×256 PNG |
+| GET | `/avatars/{filename}` | 公开 | 仅返回系统生成的本地头像文件，不开放目录列表 |
 | PUT | `/auth/password` | 登录校验 | 只能修改本人密码并校验原密码 |
+
+头像由本人在个人信息页上传，服务端校验 JPG/PNG（最大 5 MB）并按照片方向居中裁成 256×256 PNG；未上传或历史字段为外部 URL 时显示项目默认头像。头像图片可供公开面经及评论读取，本期不提供恢复默认头像操作。已上传头像只能通过新上传替换，旧文件在数据库更新成功后清理。
 | POST | `/resumes` | `interview:create` | 创建本人异步简历解析任务 |
 | GET | `/resumes`、`/resumes/{id}` | `interview:read` | 仅访问本人未隐藏简历 |
 | POST | `/resumes/{id}/retry` | `interview:manage` | 仅本人失败简历可重试 |
@@ -587,7 +591,9 @@ Swagger/Knife4j 文档仅在开发、测试环境公开；Druid 等监控入口�
 | POST | `/auth/login` | 用户登录（邮箱或用户名），返回 JWT | 否 |
 | POST | `/auth/logout` | 退出登录，当前 Token 失效 | 是 |
 | GET | `/auth/profile` | 获取当前用户信息 | 是 |
-| PUT | `/auth/profile` | 更新用户信息 | 是 |
+| PUT | `/auth/profile` | 更新昵称 | 是 |
+| POST | `/auth/profile/avatar` | 上传并替换本人头像 | 是 |
+| GET | `/avatars/{filename}` | 读取公开头像 | 否 |
 | PUT | `/auth/password` | 修改密码 | 是 |
 
 **发送验证码请求示例：**
@@ -854,7 +860,7 @@ POST /interviews/1/share
                 "id": 1,
                 "userId": 2,
                 "nickname": "张三",
-                "avatar": "https://...",
+                "avatar": "/avatars/0123456789abcdef0123456789abcdef.png",
                 "content": "感谢分享，很有帮助！",
                 "createdAt": "2026-05-27T10:00:00"
             }
@@ -1053,10 +1059,12 @@ async:
   thread-name-prefix: interview-async-
 ```
 
-### 6.2 FunASR 语音转文字、时间戳与说话人角色
+### 6.2 DashScope 语音转文字、时间戳与说话人角色
 
-- 使用 FunASR 非实时语音识别模型处理整段音频，原始音频转为模型支持的格式后一次性提交，不采用针对旧 ASR 模型的固定分片方案
-- 开启 Speaker Diarization，保留 FunASR 返回的原始 `speakerId`
+- ASR provider 统一为 DashScope；FunASR 只表示阿里云录音识别模型集合，不作为具体 provider 或模型名
+- 主模型使用千问 Audio 3.1 文件转写，备选使用 Paraformer-v2；原始音频转为单声道 WAV 后一次性提交
+- 开启 Speaker Diarization，保留模型返回的原始 `speakerId`
+- 保存句子及词级时间戳；根据岗位、行业和 JD 动态注入技术词汇
 - 必须保存句子级时间戳，包括每句话的开始时间和结束时间；不得只保存拼接后的纯文本
 - 根据问答语义、发言顺序和上下文，将原始 `speakerId` 映射为业务角色“面试官”或“候选人”
 - 角色映射结果应在整场面试内保持一致，同时保留原始 `speakerId`，便于追溯和人工纠正
@@ -1069,7 +1077,7 @@ async:
 - 将带说话人角色和句子时间戳的转写结果发送给 LLM
 - LLM 从完整对话中识别每个面试问题及对应的候选人回答
 - 输出结构化 JSON：`[{questionIndex, questionText, answerText, questionSpeaker, answerSpeaker, startTime, endTime, confidence}]`
-- `startTime`、`endTime` 必须来自 FunASR 原始句子时间戳，不允许由 LLM 猜测
+- `startTime`、`endTime` 必须来自 ASR 原始句子时间戳，不允许由 LLM 猜测
 - 问答识别采用分块处理时，必须保持问题序号连续，并避免在分块边界生成重复问题
 - 未能识别任何有效问答对，或结构化结果校验失败且重试后仍失败时，将整次处理标记为失败，允许用户重新处理
 
@@ -1167,7 +1175,7 @@ async:
 
 - [x] 用户注册/登录（JWT，支持邮箱注册+验证码验证，邮箱/用户名均可登录）
 - [x] 音频上传 + JD文本 + 简历PDF上传 + 公司/职位信息
-- [x] FunASR 语音转文字 + 句子级时间戳 + 说话人角色映射
+- [x] DashScope 千问 Audio 3.1 / Paraformer-v2 转写 + 句子/词级时间戳 + 说话人角色映射
 - [x] 自动识别问答对及问题边界
 - [x] 标准满分回答 + 评分量表 + 用户回答逐项证据比对
 - [x] 服务端 0-100 分确定性计分 + 多维度整体评分

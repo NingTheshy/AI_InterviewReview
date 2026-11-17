@@ -215,9 +215,9 @@ Controller 的职责限定为参数绑定、Bean Validation、获取当前用户
 
 | 边界接口 | 适配实现 | 外部系统 |
 | --- | --- | --- |
-| `AsrClient` / `WholeFileAsrClient` | `SpringAiFunAsrClient` | Spring AI FunASR 自定义转写模型 |
-| `LlmClient` | `SpringAiDeepSeekLlmClient`、`SpringAiOpenAiCompatibleLlmClient` | Spring AI DeepSeek 与 OpenAI 兼容文本模型 |
-| `TranscriptionModel` | `FunAsrTranscriptionModel` | DashScope FunASR 异步任务协议、时间戳和说话人元数据 |
+| `AsrClient` / `WholeFileAsrClient` | `SpringAiDashScopeAsrClient` | Spring AI DashScope 自定义转写模型 |
+| `LlmClient` | `SpringAiDeepSeekLlmClient` | Spring AI DeepSeek 文本模型 |
+| `TranscriptionModel` | `DashScopeFileTranscriptionModel` | 千问 Audio 3.1 / Paraformer-v2 异步协议、句子/词时间戳和说话人元数据 |
 | 文件边界 | `FileServiceImpl`、`FileUtil`、`PdfParser` | 本地上传目录、简历 PDF |
 | 缓存边界 | `RedisUtil` | 验证码、令牌/会话相关缓存 |
 

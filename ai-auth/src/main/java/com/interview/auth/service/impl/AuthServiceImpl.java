@@ -5,18 +5,23 @@ import com.interview.auth.dto.*;
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
 import com.interview.auth.service.AuthService;
+import com.interview.auth.service.AvatarStorageService;
 import com.interview.auth.service.RbacService;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.UserStatus;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.utils.JwtUtil;
 import com.interview.common.utils.RedisUtil;
+import com.interview.common.utils.AvatarPaths;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -40,6 +45,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final RbacService rbacService;
+    private final AvatarStorageService avatarStorageService;
 
     /**
      * Redis Key 前缀：邮箱验证码
@@ -279,7 +285,7 @@ public class AuthServiceImpl implements AuthService {
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
-                .avatar(user.getAvatar())
+                .avatar(AvatarPaths.visibleUrl(user.getAvatar()))
                 .roles(rbacService.getRoleCodes(userId))
                 .permissions(rbacService.getPermissionCodes(userId))
                 .build();
@@ -328,11 +334,11 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 更新用户信息
      * <p>
-     * 更新昵称和头像（仅允许修改非空字段）。
+     * 仅更新昵称；头像由专用上传接口维护。
      * </p>
      *
      * @param userId  用户 ID
-     * @param request 更新请求（昵称、头像）
+     * @param request 更新请求（昵称）
      */
     @Override
     public void updateProfile(Long userId, UpdateProfileRequest request) {
@@ -345,12 +351,40 @@ public class AuthServiceImpl implements AuthService {
         if (request.getNickname() != null) {
             user.setNickname(request.getNickname());
         }
-        if (request.getAvatar() != null) {
-            user.setAvatar(request.getAvatar());
-        }
-
         userMapper.updateById(user);
         log.info("用户信息更新成功: {}", user.getUsername());
+    }
+
+    /** 上传完成后才替换数据库地址；事务回滚时删除新文件，提交后删除旧文件。 */
+    @Override
+    @Transactional
+    public void uploadAvatar(Long userId, MultipartFile file) {
+        User user = userMapper.selectByIdForUpdate(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), ErrorCode.NOT_FOUND.getMessage());
+        }
+        String previous = user.getAvatar();
+        String next = avatarStorageService.store(file);
+        boolean synchronizedTransaction = TransactionSynchronizationManager.isSynchronizationActive();
+        if (synchronizedTransaction) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == STATUS_COMMITTED) avatarStorageService.deleteStoredAvatar(previous);
+                    else avatarStorageService.deleteStoredAvatar(next);
+                }
+            });
+        }
+        try {
+            user.setAvatar(next);
+            if (userMapper.updateById(user) != 1) {
+                throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "用户不存在或头像更新失败");
+            }
+            if (!synchronizedTransaction) avatarStorageService.deleteStoredAvatar(previous);
+        } catch (RuntimeException ex) {
+            avatarStorageService.deleteStoredAvatar(next);
+            throw ex;
+        }
     }
 
     /**
@@ -386,7 +420,7 @@ public class AuthServiceImpl implements AuthService {
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
-                .avatar(user.getAvatar())
+                .avatar(AvatarPaths.visibleUrl(user.getAvatar()))
                 .build();
 
         LoginResponse response = LoginResponse.builder()

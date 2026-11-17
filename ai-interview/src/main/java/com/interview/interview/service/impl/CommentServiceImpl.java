@@ -7,6 +7,7 @@ import com.interview.auth.mapper.UserMapper;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
+import com.interview.common.utils.AvatarPaths;
 import com.interview.interview.dto.CommentResponse;
 import com.interview.interview.entity.InterviewComment;
 import com.interview.interview.entity.InterviewExperience;
@@ -75,7 +76,7 @@ public class CommentServiceImpl implements CommentService {
                             .id(comment.getId())
                             .userId(comment.getUserId())
                             .nickname(user != null ? user.getNickname() : "未知用户")
-                            .avatar(user != null ? user.getAvatar() : null)
+                            .avatar(user != null ? AvatarPaths.visibleUrl(user.getAvatar()) : null)
                             .content(comment.getContent())
                             .createdAt(comment.getCreatedAt())
                             .build();

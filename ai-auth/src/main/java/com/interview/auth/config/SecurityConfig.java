@@ -72,6 +72,7 @@ public class SecurityConfig {
                             "/experiences", "/experiences/{id}",
                             "/experiences/{id}/comments").permitAll();
                     auth.requestMatchers(HttpMethod.GET, "/asr-files/**").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/avatars/**").permitAll();
                     auth.requestMatchers("/favicon.ico").permitAll();
                     if (Arrays.stream(environment.getActiveProfiles()).noneMatch("prod"::equalsIgnoreCase)) {
                         auth.requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**")

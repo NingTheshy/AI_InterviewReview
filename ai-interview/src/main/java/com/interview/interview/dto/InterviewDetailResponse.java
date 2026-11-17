@@ -38,7 +38,7 @@ public class InterviewDetailResponse {
     /** 处理状态 */
     private Integer status;
 
-    /** 处理步骤：0=待处理, 1=FunASR转写, 2=标准生成与比对, 3=计分保存, 4=整体总结 */
+    /** 处理步骤：0=待处理, 1=DashScope ASR转写, 2=标准生成与比对, 3=计分保存, 4=整体总结 */
     private Integer processingStep;
 
     private String lastErrorCode;

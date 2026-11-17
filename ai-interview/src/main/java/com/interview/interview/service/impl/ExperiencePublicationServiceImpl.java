@@ -9,6 +9,7 @@ import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.InterviewStatus;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.result.PageResult;
+import com.interview.common.utils.AvatarPaths;
 import com.interview.interview.dto.ExperienceDetailResponse;
 import com.interview.interview.dto.ExperienceListResponse;
 import com.interview.interview.dto.ExperiencePublicationResponse;
@@ -77,7 +78,7 @@ public class ExperiencePublicationServiceImpl implements ExperienceService {
                 .orderByAsc(InterviewQuestion::getQuestionIndex));
         return ExperienceDetailResponse.builder().id(experience.getId())
                 .authorNickname(author == null ? null : author.getNickname())
-                .authorAvatar(author == null ? null : author.getAvatar()).summaryMarkdown(experience.getSummaryMarkdown())
+                .authorAvatar(author == null ? null : AvatarPaths.visibleUrl(author.getAvatar())).summaryMarkdown(experience.getSummaryMarkdown())
                 .title(interview.getTitle()).companyName(interview.getCompanyName()).positionTitle(interview.getPositionTitle())
                 .industry(interview.getIndustry()).interviewType(interview.getInterviewType()).overallScore(interview.getOverallScore())
                 .dimensionContent(interview.getDimensionContent()).dimensionLogic(interview.getDimensionLogic())
@@ -147,7 +148,7 @@ public class ExperiencePublicationServiceImpl implements ExperienceService {
         return values.stream().map(value -> {
             Interview interview = interviews.get(value.getInterviewId()); User author = users.get(value.getUserId());
             return ExperienceListResponse.builder().id(value.getId()).authorNickname(author == null ? null : author.getNickname())
-                    .authorAvatar(author == null ? null : author.getAvatar()).title(interview.getTitle())
+                    .authorAvatar(author == null ? null : AvatarPaths.visibleUrl(author.getAvatar())).title(interview.getTitle())
                     .companyName(interview.getCompanyName()).positionTitle(interview.getPositionTitle())
                     .industry(interview.getIndustry()).interviewType(interview.getInterviewType())
                     .overallScore(interview.getOverallScore()).questionCount(counts.getOrDefault(interview.getId(), 0L).intValue())

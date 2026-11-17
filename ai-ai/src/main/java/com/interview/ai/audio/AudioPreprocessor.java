@@ -225,7 +225,7 @@ public class AudioPreprocessor {
         if (ffmpegPath == null) {
             throw new BusinessException(ErrorCode.AI_MODEL_CALL_FAILED.getCode(),
                     "未找到 FFmpeg，无法处理 " + format + " 格式音频。"
-                            + "请安装 FFmpeg 并配置 ai.funasr.ffmpeg-path，或使用 WAV 格式上传。");
+                            + "请安装 FFmpeg 并配置 ai.dashscope-asr.ffmpeg-path，或使用 WAV 格式上传。");
         }
 
         Path tempDir = Files.createTempDirectory("audio_preprocess_");

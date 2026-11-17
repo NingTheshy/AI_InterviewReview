@@ -18,13 +18,13 @@
 
 - 用户、角色、权限及高风险操作审计；
 - 用户级不可变简历版本和异步解析任务；
-- 面试、FunASR 转写、问答识别、评分、重评、回收站和任务租约；
+- 面试、DashScope ASR 转写、问答识别、评分、重评、回收站和任务租约；
 - 面试总笔记、逐问题笔记和问题收藏；
 - 数字 ID 公开面经、发布治理及评论；
 - 通用/个性化标准答案缓存；
 - ASR 与文本模型动态配置。
 
-系统不再使用 interview_share、分享 Token、Whisper 或 MIMO-ASR。公开内容统一由 interview_experience 表表达，ASR 仅使用 FunASR。
+系统不再使用 interview_share、分享 Token、Whisper 或 MIMO-ASR。公开内容统一由 interview_experience 表表达；ASR provider 仅使用 DashScope，LLM 仅使用 DeepSeek。
 
 ## 2. 表清单
 
@@ -71,7 +71,7 @@
 | --- | --- | --- |
 | 标识 | id | 自增主键 |
 | 登录 | username、password、email | 用户名、邮箱唯一；密码保存 BCrypt 密文 |
-| 展示 | nickname、avatar | 公开面经可展示昵称和头像；昵称为空时不回退用户名 |
+| 展示 | nickname、avatar | 公开面经可展示昵称和头像；`avatar` 仅保存 `/avatars/{随机文件名}.png` 相对地址，未上传为 NULL；历史外部 URL 在响应中视为无头像 |
 | 状态 | status、deleted | 启禁用与逻辑删除 |
 | 审计 | last_login_at、login_count、created_at、updated_at | 登录及时间审计 |
 
@@ -95,7 +95,7 @@
 | 基本信息 | title、company_name、position_title、industry、company_tier、interview_type | 类型限定为 coding、behavioral、system_design、comprehensive |
 | 简历/JD | resume_id、resume_file_path、resume_text、jd_text | resume_id 绑定简历版本；正文和路径作为历史不可变快照 |
 | 音频 | audio_file_path、audio_file_size、audio_duration | MP3/WAV，最大 2GB、最长 2 小时 |
-| 转写 | transcript_text、transcript_segments | 完整文本及句子级 JSON；保存毫秒时间戳、speakerId 和角色 |
+| 转写 | transcript_text、transcript_segments | 完整文本及句子级 JSON；保存句子/词毫秒时间戳、speakerId 和角色 |
 | 评分 | overall_score、五个 dimension_*、improvement_summary、strengths、weaknesses | 面试汇总结果 |
 | 状态机 | status、processing_step、last_error_code、error_message | 状态：处理中、完成、失败、取消；阶段：未开始、转写、问答评分、保存、总结 |
 | 任务可靠性 | processing_token、lease_expires_at、heartbeat_at | 防重复、续租、接管和旧线程回写保护 |
@@ -162,9 +162,9 @@ test_status、test_fingerprint、last_tested_at、last_test_message 保存连接
 
 初始化数据只包含：
 
-- FunASR 语音识别配置；
-- DeepSeek 文本模型配置；
-- MIMO 文本模型配置。
+- 千问 Audio 3.1 文件转写配置（主模型）；
+- Paraformer-v2 文件转写配置（备选模型）；
+- DeepSeek Flash 文本模型配置。
 
 脚本不包含真实 API Key。
 
@@ -185,7 +185,7 @@ test_status、test_fingerprint、last_tested_at、last_test_message 保存连接
 1. 创建记录时申请用户级处理中唯一槽位并生成任务令牌；
 2. 工作线程只在令牌仍匹配时写入阶段结果，并定期续租；
 3. 租约过期后新任务可以接管，旧线程因令牌失效不能继续写入；
-4. 失败或取消后从最后完整阶段重试；完整转写存在时不重复调用 FunASR；
+4. 失败或取消后从最后完整阶段重试；完整转写存在时不重复调用 ASR；
 5. 重评先保存新结果，事务校验完成后原子替换当前结果；未匹配旧问题转为归档。
 
 ### 5.2 删除与清理

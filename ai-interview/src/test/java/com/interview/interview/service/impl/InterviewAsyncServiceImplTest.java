@@ -81,7 +81,7 @@ class InterviewAsyncServiceImplTest {
         when(interviewMapper.updateById(any(Interview.class))).thenReturn(1);
         when(interviewMapper.ownsTask(TEST_INTERVIEW_ID, "test-token")).thenReturn(1);
         when(interviewMapper.heartbeat(eq(TEST_INTERVIEW_ID), eq("test-token"), any())).thenReturn(1);
-        when(transcriptionService.transcribeDetailedWithSnapshot(anyString(), isNull())).thenReturn(
+        when(transcriptionService.transcribeDetailedWithSnapshot(anyString(), isNull(), any())).thenReturn(
                 new TranscriptionResult("面试对话文本",
                         List.of(new AsrSentence("面试对话文本", "0", "UNKNOWN", 0, 1000)), 1));
         when(companyClassifier.classify(isNull(), isNull(), isNull())).thenReturn(CompanyTier.TIER_3);
@@ -94,7 +94,7 @@ class InterviewAsyncServiceImplTest {
         interviewAsyncService.processInterview(TEST_INTERVIEW_ID, "test-token");
 
         verify(interviewMapper, atLeast(2)).updateById(any(Interview.class));
-        verify(transcriptionService).transcribeDetailedWithSnapshot(anyString(), isNull());
+        verify(transcriptionService).transcribeDetailedWithSnapshot(anyString(), isNull(), any());
         verify(companyClassifier).classify(isNull(), isNull(), isNull());
         verify(scoringService).analyzeWithRubricSnapshot(anyString(), isNull(), isNull(), isNull(), isNull(), isNull(), anyInt(), isNull(), anyList());
         verify(scoreResultParser).parseAndSave(eq(testInterview), anyString(), eq("test-token"));
@@ -117,7 +117,7 @@ class InterviewAsyncServiceImplTest {
         when(interviewMapper.selectById(TEST_INTERVIEW_ID)).thenReturn(testInterview);
         when(interviewMapper.updateById(any(Interview.class))).thenReturn(1);
         when(interviewMapper.ownsTask(TEST_INTERVIEW_ID, "test-token")).thenReturn(1);
-        when(transcriptionService.transcribeDetailedWithSnapshot(anyString(), isNull()))
+        when(transcriptionService.transcribeDetailedWithSnapshot(anyString(), isNull(), any()))
                 .thenThrow(new RuntimeException("AI服务不可用"));
 
         interviewAsyncService.processInterview(TEST_INTERVIEW_ID, "test-token");

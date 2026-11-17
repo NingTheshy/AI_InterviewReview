@@ -93,14 +93,14 @@ class TranscriptionServiceImplTest {
         when(aiClientFactory.getAsrClientByConfigId(null)).thenReturn(wholeFileAsrClient);
         when(audioPreprocessor.preprocessToMonoWav(eq(audioFile), any(Path.class))).thenReturn(60.0);
         when(wholeFileAsrClient.maxRecommendedDuration()).thenReturn(Duration.ofHours(2));
-        when(wholeFileAsrClient.transcribeDetailed(any(Path.class), eq("zh"))).thenReturn(
+        when(wholeFileAsrClient.transcribeDetailed(any(Path.class), eq("zh"), any())).thenReturn(
                 new TranscriptionResult("[说话人 0] 测试文本",
                         List.of(new AsrSentence("测试文本", "0", "UNKNOWN", 0, 1000)), null));
 
         String result = transcriptionService.transcribe(audioFile.toString(), null);
 
         assertEquals("[说话人 0] 测试文本", result);
-        verify(wholeFileAsrClient).transcribeDetailed(any(Path.class), eq("zh"));
+        verify(wholeFileAsrClient).transcribeDetailed(any(Path.class), eq("zh"), any());
         verify(asrClient, never()).transcribe(any(), anyString());
     }
 
@@ -115,7 +115,7 @@ class TranscriptionServiceImplTest {
         when(aiClientFactory.getAsrClientByConfigId(null)).thenReturn(wholeFileAsrClient);
         when(audioPreprocessor.preprocessToMonoWav(eq(audioFile), any(Path.class))).thenReturn(60.2);
         when(wholeFileAsrClient.maxRecommendedDuration()).thenReturn(Duration.ofHours(2));
-        when(wholeFileAsrClient.transcribeDetailed(any(Path.class), eq("zh"))).thenReturn(providerResult);
+        when(wholeFileAsrClient.transcribeDetailed(any(Path.class), eq("zh"), any())).thenReturn(providerResult);
 
         TranscriptionResult result = transcriptionService.transcribeDetailed(audioFile.toString(), null);
 

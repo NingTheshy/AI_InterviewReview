@@ -8,6 +8,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -74,6 +76,13 @@ public class AuthController {
     public Result<Void> updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
         authService.updateProfile(userId, request);
+        return Result.success();
+    }
+
+    @Operation(summary = "上传当前用户头像")
+    @PostMapping(value = "/profile/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<Void> uploadAvatar(@RequestPart("file") MultipartFile file) {
+        authService.uploadAvatar(SecurityUtils.getCurrentUserId(), file);
         return Result.success();
     }
 }

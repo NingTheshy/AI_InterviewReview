@@ -4,7 +4,7 @@
 > 日期: 2026-10-21
 > 状态: 已同步 Spring AI 统一模型层、异步简历与可靠任务状态机
 
-> **当前架构基线：** ASR 仅使用 FunASR 自定义 Spring AI `TranscriptionModel`；DeepSeek/MiMo 使用 Spring AI `ChatModel`。简历和面试均采用带任务令牌、租约和启动恢复的异步任务；音频为 MP3/WAV、最大 2GB、最长 2 小时；私密分享已收敛为数字 ID 公开面经。
+> **当前架构基线：** ASR provider 仅使用 DashScope，自定义 Spring AI `TranscriptionModel` 支持千问 Audio 3.1 主模型与 Paraformer-v2 备选模型；LLM 仅使用 DeepSeek `ChatModel`。简历和面试均采用带任务令牌、租约和启动恢复的异步任务。
 
 ---
 
@@ -16,7 +16,7 @@
 |------|------|------|
 | Java | 17 LTS | 长期支持版本，Spring Boot 3.x 最低要求 |
 | Spring Boot | 3.5.15 | 主框架，提供自动配置、嵌入式服务器 |
-| Spring AI | 1.1.8 | 文本生成与语音转写的统一模型 API；FunASR 使用自定义 `TranscriptionModel` |
+| Spring AI | 1.1.8 | 文本生成与语音转写的统一模型 API；DashScope 使用自定义 `TranscriptionModel` |
 | Spring Security | 6.2.x | 安全框架，处理认证授权 |
 | Spring Web (MVC) | 6.1.x | Web 框架，RESTful API 支持 |
 | MyBatis-Plus | 3.5.5 | ORM 框架，简化 CRUD 操作 |

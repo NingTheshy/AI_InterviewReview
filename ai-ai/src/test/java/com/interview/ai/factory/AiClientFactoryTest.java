@@ -2,7 +2,7 @@ package com.interview.ai.factory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.ai.config.AiProperties;
-import com.interview.ai.config.FunAsrProperties;
+import com.interview.ai.config.DashScopeAsrProperties;
 import com.interview.ai.entity.AiConfig;
 import com.interview.ai.mapper.AiConfigMapper;
 import com.interview.ai.security.AiConfigSecretCipher;
@@ -33,19 +33,19 @@ class AiClientFactoryTest {
     private AiConfigSecretCipher secretCipher;
 
     private final AiProperties aiProperties = new AiProperties();
-    private final FunAsrProperties funAsrProperties = new FunAsrProperties();
+    private final DashScopeAsrProperties asrProperties = new DashScopeAsrProperties();
 
     @BeforeEach
     void setUp() {
         aiClientFactory = new AiClientFactory(aiConfigMapper, secretCipher, aiProperties,
-                funAsrProperties, new ObjectMapper());
+                asrProperties, new ObjectMapper());
         lenient().when(secretCipher.decrypt(anyString())).thenReturn("test-api-key");
     }
 
     @Test
     @DisplayName("getDefaultAsrClient - 返回 ASR 客户端")
     void getDefaultAsrClient_returnsAsrClient() {
-        when(aiConfigMapper.selectOne(any())).thenReturn(config("funasr", ConfigType.ASR));
+        when(aiConfigMapper.selectOne(any())).thenReturn(config("dashscope", ConfigType.ASR));
 
         AsrClient client = aiClientFactory.getDefaultAsrClient();
         assertNotNull(client);
@@ -63,8 +63,8 @@ class AiClientFactoryTest {
     @Test
     @DisplayName("getAsrClient - 数据库中已启用的 provider 返回客户端")
     void getAsrClient_enabledProvider_returnsClient() {
-        when(aiConfigMapper.selectOne(any())).thenReturn(config("funasr", ConfigType.ASR));
-        AsrClient client = aiClientFactory.getAsrClient("funasr");
+        when(aiConfigMapper.selectOne(any())).thenReturn(config("dashscope", ConfigType.ASR));
+        AsrClient client = aiClientFactory.getAsrClient("dashscope");
         assertNotNull(client);
     }
 
@@ -84,6 +84,16 @@ class AiClientFactoryTest {
     }
 
     @Test
+    @DisplayName("getDefaultLlmClient - 支持管理员配置阿里云兼容端点")
+    void getDefaultLlmClient_deepSeekWithAliyunCompatibleEndpoint_returnsClient() {
+        AiConfig config = config("deepseek", ConfigType.LLM);
+        config.setApiEndpoint("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        when(aiConfigMapper.selectOne(any())).thenReturn(config);
+
+        assertNotNull(aiClientFactory.getDefaultLlmClient());
+    }
+
+    @Test
     @DisplayName("getLlmClient - 未注册的 provider 抛出异常")
     void getLlmClient_unregisteredProvider_throwsException() {
         when(aiConfigMapper.selectOne(any())).thenReturn(null);
@@ -95,10 +105,10 @@ class AiClientFactoryTest {
         config.setId(type == ConfigType.ASR ? 1L : 2L);
         config.setProvider(provider);
         config.setConfigType(type.getCode());
-        config.setModelName(type == ConfigType.ASR ? "fun-asr" : "deepseek-chat");
+        config.setModelName(type == ConfigType.ASR ? "qwen-audio-3.1-asr-flash-filetrans" : "deepseek-flash");
         config.setApiEndpoint(type == ConfigType.ASR
                 ? "https://dashscope.aliyuncs.com/api/v1"
-                : "https://api.deepseek.com/v1");
+                : "https://api.deepseek.com");
         config.setApiKey("encrypted-key");
         config.setStatus(1);
         config.setTestStatus(1);

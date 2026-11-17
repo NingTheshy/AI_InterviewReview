@@ -1,5 +1,6 @@
 package com.interview.ai.service;
 
+import com.interview.ai.dto.AsrTranscriptionContext;
 import com.interview.ai.dto.TranscriptionResult;
 
 /**
@@ -27,4 +28,8 @@ public interface TranscriptionService {
 
     /** 使用任务开始时保存的加密配置快照转写。 */
     TranscriptionResult transcribeDetailedWithSnapshot(String audioFilePath, String encryptedSnapshot);
+
+    /** 使用任务快照与岗位动态词汇转写，保证任务期间模型配置不漂移。 */
+    TranscriptionResult transcribeDetailedWithSnapshot(String audioFilePath, String encryptedSnapshot,
+                                                       AsrTranscriptionContext context);
 }

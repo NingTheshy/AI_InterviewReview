@@ -404,7 +404,7 @@ public class InterviewServiceImpl implements InterviewService {
         if (step == null) return "未开始";
         return switch (step) {
             case 0 -> "未开始";
-            case 1 -> "FunASR转写与说话人识别";
+            case 1 -> "DashScope ASR转写与说话人识别";
             case 2 -> "标准答案生成与逐项比对";
             case 3 -> "服务端计分与结果保存";
             case 4 -> "整体评分与总结";

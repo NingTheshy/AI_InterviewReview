@@ -15,6 +15,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -491,7 +492,6 @@ class AuthControllerTest {
         void updateProfile_Success() throws Exception {
             UpdateProfileRequest request = new UpdateProfileRequest();
             request.setNickname("新昵称");
-            request.setAvatar("https://example.com/avatar.jpg");
 
             doNothing().when(authService).updateProfile(anyLong(), any(UpdateProfileRequest.class));
 
@@ -502,6 +502,26 @@ class AuthControllerTest {
                     .andExpect(jsonPath("$.code").value(200));
 
             verify(authService).updateProfile(anyLong(), any(UpdateProfileRequest.class));
+        }
+
+        @Test
+        @DisplayName("旧头像 URL 参数不再允许提交")
+        void rejectsAvatarUrl() throws Exception {
+            mockMvc.perform(put(BASE_URL + "/profile")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"nickname\":\"测试\",\"avatar\":\"https://example.com/a.png\"}"))
+                    .andExpect(status().isBadRequest());
+            verify(authService, never()).updateProfile(anyLong(), any(UpdateProfileRequest.class));
+        }
+
+        @Test
+        @DisplayName("通过文件接口上传当前用户头像")
+        void uploadAvatar() throws Exception {
+            MockMultipartFile file = new MockMultipartFile("file", "a.png", "image/png", new byte[]{1});
+            mockMvc.perform(multipart(BASE_URL + "/profile/avatar").file(file))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(200));
+            verify(authService).uploadAvatar(eq(TEST_USER_ID), any());
         }
 
         @Test

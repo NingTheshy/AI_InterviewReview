@@ -55,8 +55,8 @@ class AiConfigServiceImplTest {
         mockConfig.setId(1L);
         mockConfig.setConfigName("DeepSeek");
         mockConfig.setProvider("deepseek");
-        mockConfig.setModelName("deepseek-chat");
-        mockConfig.setApiEndpoint("https://api.deepseek.com/v1");
+        mockConfig.setModelName("deepseek-flash");
+        mockConfig.setApiEndpoint("https://api.deepseek.com");
         mockConfig.setConfigType(ConfigType.LLM.getCode());
         mockConfig.setIsDefault(0);
         mockConfig.setStatus(1);
@@ -100,6 +100,40 @@ class AiConfigServiceImplTest {
     }
 
     @Test
+    @DisplayName("create - 拒绝已移除的 Xiaomi 文本供应商")
+    void create_xiaomiProvider_rejected() {
+        mockConfig.setProvider("xiaomi");
+        mockConfig.setApiKey("sk-test");
+
+        assertThrows(BusinessException.class, () -> aiConfigService.create(mockConfig));
+        verify(aiConfigMapper, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("create - DashScope 仅允许已选定的两个 ASR 模型")
+    void create_unknownDashScopeAsrModel_rejected() {
+        mockConfig.setProvider("dashscope");
+        mockConfig.setConfigType(ConfigType.ASR.getCode());
+        mockConfig.setModelName("fun-asr");
+        mockConfig.setApiEndpoint("https://dashscope.aliyuncs.com/api/v1");
+        mockConfig.setApiKey("sk-test");
+
+        assertThrows(BusinessException.class, () -> aiConfigService.create(mockConfig));
+        verify(aiConfigMapper, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("create - DeepSeek 允许管理员配置阿里云兼容端点")
+    void create_deepSeekWithAliyunCompatibleEndpoint_accepted() {
+        mockConfig.setApiEndpoint("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        mockConfig.setApiKey("sk-test");
+
+        aiConfigService.create(mockConfig);
+
+        verify(aiConfigMapper).insert(mockConfig);
+    }
+
+    @Test
     @DisplayName("update - 存在时更新成功")
     void update_exists_updatesConfig() {
         when(aiConfigMapper.selectById(1L)).thenReturn(mockConfig);
@@ -118,8 +152,8 @@ class AiConfigServiceImplTest {
         AiConfig request = new AiConfig();
         request.setConfigName("DeepSeek");
         request.setProvider("deepseek");
-        request.setModelName("deepseek-chat");
-        request.setApiEndpoint("https://api.deepseek.com/v1");
+        request.setModelName("deepseek-flash");
+        request.setApiEndpoint("https://api.deepseek.com");
         request.setConfigType(ConfigType.LLM.getCode());
         request.setApiKey("****cret");
         aiConfigService.update(1L, request);

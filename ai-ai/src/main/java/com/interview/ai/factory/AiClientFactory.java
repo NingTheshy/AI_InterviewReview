@@ -3,14 +3,14 @@ package com.interview.ai.factory;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.ai.config.AiProperties;
+import com.interview.ai.config.AiProviderPolicy;
 import com.interview.ai.config.AiProviderProperties;
-import com.interview.ai.config.FunAsrProperties;
+import com.interview.ai.config.DashScopeAsrProperties;
 import com.interview.ai.client.SpringAiDeepSeekLlmClient;
-import com.interview.ai.client.SpringAiFunAsrClient;
-import com.interview.ai.client.SpringAiOpenAiCompatibleLlmClient;
+import com.interview.ai.client.SpringAiDashScopeAsrClient;
 import com.interview.ai.entity.AiConfig;
 import com.interview.ai.mapper.AiConfigMapper;
-import com.interview.ai.model.funasr.FunAsrTranscriptionModel;
+import com.interview.ai.model.dashscope.DashScopeFileTranscriptionModel;
 import com.interview.ai.security.AiConfigSecretCipher;
 import com.interview.ai.service.AsrClient;
 import com.interview.ai.service.LlmClient;
@@ -45,7 +45,7 @@ public class AiClientFactory {
     private final AiConfigMapper aiConfigMapper;
     private final AiConfigSecretCipher secretCipher;
     private final AiProperties aiProperties;
-    private final FunAsrProperties funAsrProperties;
+    private final DashScopeAsrProperties dashScopeAsrProperties;
     private final ObjectMapper objectMapper;
 
     private final Map<String, AsrClient> dynamicAsrCache = new ConcurrentHashMap<>();
@@ -185,12 +185,17 @@ public class AiClientFactory {
     }
 
     private AsrClient buildAsr(RuntimeConfig runtime) {
-        if (!"funasr".equalsIgnoreCase(runtime.provider())) {
-            throw new BusinessException(ErrorCode.AI_CONFIG_NOT_FOUND.getCode(), "当前仅支持FunASR语音识别");
+        if (!"dashscope".equalsIgnoreCase(runtime.provider())) {
+            throw new BusinessException(ErrorCode.AI_CONFIG_NOT_FOUND.getCode(), "当前仅支持 DashScope 语音识别");
+        }
+        if (!DashScopeFileTranscriptionModel.SUPPORTED_MODELS.contains(runtime.modelName())) {
+            throw new BusinessException(ErrorCode.AI_CONFIG_NOT_FOUND.getCode(),
+                    "不支持的 DashScope ASR 模型: " + runtime.modelName());
         }
         return dynamicAsrCache.computeIfAbsent(runtime.cacheKey(), ignored -> {
             AiProviderProperties properties = runtime.toProperties();
-            return new SpringAiFunAsrClient(new FunAsrTranscriptionModel(properties, funAsrProperties),
+            return new SpringAiDashScopeAsrClient(
+                    new DashScopeFileTranscriptionModel(properties, dashScopeAsrProperties),
                     properties.getModelName());
         });
     }
@@ -207,15 +212,14 @@ public class AiClientFactory {
                 client.setCallTimeout(Duration.ofSeconds(properties.getTimeoutSeconds()));
                 return client;
             }
-            if ("xiaomi".equalsIgnoreCase(runtime.provider())) {
-                return new SpringAiOpenAiCompatibleLlmClient(properties);
-            }
             throw new BusinessException(ErrorCode.AI_CONFIG_NOT_FOUND.getCode(),
                     "不支持的文本模型供应商: " + runtime.provider());
         });
     }
 
     private RuntimeConfig toRuntime(AiConfig config) {
+        AiProviderPolicy.validate(config.getConfigType(), config.getProvider(), config.getModelName(),
+                config.getApiEndpoint());
         String apiKey = secretCipher.decrypt(config.getApiKey());
         if (!StringUtils.hasText(apiKey)) {
             AiProviderProperties fallback = aiProperties.getProvider(config.getProvider());
@@ -225,9 +229,6 @@ public class AiClientFactory {
             throw new BusinessException(ErrorCode.AI_CONFIG_NOT_FOUND.getCode(), "AI配置缺少可用API Key");
         }
         String endpoint = config.getApiEndpoint() == null ? "" : config.getApiEndpoint().replaceAll("/+$", "");
-        if ("xiaomi".equalsIgnoreCase(config.getProvider()) && endpoint.endsWith("/v1")) {
-            endpoint = endpoint.substring(0, endpoint.length() - 3);
-        }
         return new RuntimeConfig(config.getId(), config.getProvider(), config.getModelName(), endpoint,
                 apiKey, config.getConfigType(), String.valueOf(config.getUpdatedAt()));
     }
@@ -236,6 +237,8 @@ public class AiClientFactory {
         try {
             RuntimeConfig runtime = objectMapper.readValue(secretCipher.decrypt(snapshot), RuntimeConfig.class);
             if (runtime.configType() != type.getCode()) throw new IllegalArgumentException("配置类型不匹配");
+            AiProviderPolicy.validate(runtime.configType(), runtime.provider(), runtime.modelName(),
+                    runtime.apiEndpoint());
             return runtime;
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.AI_CONFIG_NOT_FOUND.getCode(), "AI配置快照不可用: " + e.getMessage());

@@ -1,7 +1,7 @@
 package com.interview.admin.controller;
 
-import com.interview.auth.entity.PermissionAuditLog;
-import com.interview.auth.service.AuditService;
+import com.interview.admin.dto.AdminAuditLogResponse;
+import com.interview.admin.service.impl.AdminAuditReadService;
 import com.interview.common.result.PageResult;
 import com.interview.common.result.Result;
 import io.swagger.v3.oas.annotations.Operation;
@@ -20,15 +20,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class AdminAuditController {
 
-    private final AuditService auditService;
+    private final AdminAuditReadService auditReadService;
 
     /** 分页查看角色、状态、配置及内容管理等高风险操作。 */
     @Operation(summary = "获取权限与高风险操作审计日志")
     @GetMapping
     @PreAuthorize("hasAuthority('audit:read')")
-    public Result<PageResult<PermissionAuditLog>> list(
+    public Result<PageResult<AdminAuditLogResponse>> list(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return Result.success(auditService.list(page, size));
+        return Result.success(auditReadService.list(page, size));
     }
 }

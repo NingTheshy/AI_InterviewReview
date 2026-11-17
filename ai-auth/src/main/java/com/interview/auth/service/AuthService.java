@@ -1,6 +1,7 @@
 package com.interview.auth.service;
 
 import com.interview.auth.dto.*;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 认证服务接口
@@ -63,4 +64,7 @@ public interface AuthService {
      * @param request 更新请求
      */
     void updateProfile(Long userId, UpdateProfileRequest request);
+
+    /** 上传并替换当前用户头像。 */
+    void uploadAvatar(Long userId, MultipartFile file);
 }

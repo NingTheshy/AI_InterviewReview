@@ -16,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Set;
@@ -80,13 +81,9 @@ public class RbacBootstrapInitializer implements ApplicationRunner {
     }
 
     private void validatePassword(String value) {
-        boolean strong = value.length() >= 12
-                && value.chars().anyMatch(Character::isUpperCase)
-                && value.chars().anyMatch(Character::isLowerCase)
-                && value.chars().anyMatch(Character::isDigit)
-                && value.chars().anyMatch(ch -> !Character.isLetterOrDigit(ch));
-        if (!strong) {
-            throw new IllegalStateException("初始管理员密码至少 12 位，且必须包含大小写字母、数字和特殊字符");
+        // 是否为空已在引导配置完整性检查中处理；这里只限制 BCrypt 的安全输入上限。
+        if (value.getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new IllegalStateException("初始管理员密码不能超过 72 字节");
         }
     }
 

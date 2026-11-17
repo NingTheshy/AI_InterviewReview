@@ -1,7 +1,7 @@
 package com.interview.interview.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.interview.ai.config.FunAsrProperties;
+import com.interview.ai.config.DashScopeAsrProperties;
 import com.interview.common.utils.AsrFileUrlSigner;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.mapper.InterviewMapper;
@@ -32,7 +32,7 @@ import java.util.Locale;
 public class FileServiceImpl implements FileService {
 
     private final InterviewMapper interviewMapper;
-    private final FunAsrProperties funAsrProperties;
+    private final DashScopeAsrProperties dashScopeAsrProperties;
 
     @Value("${interview.file.upload-dir:./uploads}")
     private String uploadDir;
@@ -61,7 +61,7 @@ public class FileServiceImpl implements FileService {
      */
     @Override
     public FileDownload prepareAsrDownload(String filename, long expires, String token) {
-        if (!AsrFileUrlSigner.verify(filename, expires, token, funAsrProperties.getFileUrlSecret())) {
+        if (!AsrFileUrlSigner.verify(filename, expires, token, dashScopeAsrProperties.getFileUrlSecret())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
         validateFilename(filename);

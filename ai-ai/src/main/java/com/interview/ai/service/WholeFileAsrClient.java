@@ -1,5 +1,6 @@
 package com.interview.ai.service;
 
+import com.interview.ai.dto.AsrTranscriptionContext;
 import com.interview.ai.dto.TranscriptionResult;
 
 import java.nio.file.Path;
@@ -21,6 +22,12 @@ public interface WholeFileAsrClient extends AsrClient {
      */
     default TranscriptionResult transcribeDetailed(Path audioFile, String language) {
         return TranscriptionResult.textOnly(transcribe(audioFile, language));
+    }
+
+    /** 使用岗位、JD 和模型热词配置进行结构化转写。 */
+    default TranscriptionResult transcribeDetailed(Path audioFile, String language,
+                                                    AsrTranscriptionContext context) {
+        return transcribeDetailed(audioFile, language);
     }
 
     Duration maxRecommendedDuration();
