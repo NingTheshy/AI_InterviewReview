@@ -28,6 +28,7 @@ public class Interview extends BaseEntity {
     private String jdText;
     private String transcriptText;
     private String transcriptSegments;
+    private String dialogueTurns;
     private Integer overallScore;
     private Integer dimensionContent;
     private Integer dimensionLogic;

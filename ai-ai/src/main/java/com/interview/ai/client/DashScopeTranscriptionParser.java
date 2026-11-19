@@ -28,6 +28,7 @@ public final class DashScopeTranscriptionParser {
         }
         List<AsrSentence> sentences = new ArrayList<>();
         StringBuilder readableText = new StringBuilder();
+        int transcriptIndex = 0;
         for (JsonNode transcript : transcripts) {
             JsonNode sentenceNodes = transcript.path("sentences");
             if (!sentenceNodes.isArray()) continue;
@@ -42,11 +43,13 @@ public final class DashScopeTranscriptionParser {
                     throw invalidResult("DashScope ASR 已开启说话人分离，但句子缺少 speaker_id");
                 }
                 List<AsrWord> words = parseWords(sentence.path("words"));
-                sentences.add(new AsrSentence(text, speakerId, AsrSentence.UNKNOWN_ROLE, start, end, words));
+                sentences.add(new AsrSentence(text, speakerId, AsrSentence.UNKNOWN_ROLE, start, end, words,
+                        transcriptIndex));
                 if (!readableText.isEmpty()) readableText.append('\n');
                 if (StringUtils.hasText(speakerId)) readableText.append("[说话人 ").append(speakerId).append("] ");
                 readableText.append(text);
             }
+            transcriptIndex++;
         }
         if (sentences.isEmpty()) throw invalidResult("DashScope ASR 未返回可用的句子级转写结果");
         return new TranscriptionResult(readableText.toString(), sentences, null);

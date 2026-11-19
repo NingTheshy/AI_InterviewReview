@@ -488,13 +488,12 @@ InterviewAsyncServiceImpl.processInterview(interviewId)
     │       └── 返回 CompanyTier (TIER_1 ~ TIER_5)
     │
     ├── Step 2: 问题识别 + 评分 (processingStep=2)
-    │   └── ScoringService.analyzeAndScoreBatch(transcript, jd, resume, configId, tier)
-    │       ├── LLM 语义识别 QA 对（替代正则拆分）
-    │       ├── 分批评分（每批 5000 字符）
-    │       │   ├── 阶梯制评分（卓越/优秀/良好/一般/较弱/差）
-    │       │   ├── 证据锚定（每个维度引用原文）
-    │       │   └── 可选：双阶段评估（分析 → 评分，2 倍精度）
-    │       └── 合并结果 → 生成最终评分报告
+    │   └── ScoringService.analyzeWithRubricSnapshot(transcript, jd, resume, ...)
+    │       ├── 带时间戳句子分块识别；同主题追问与回答链归并，低置信度保留原因但不计分
+    │       ├── 按题型生成或复用 rubric-v4 口述范例、关键要点和固定量表；K/C 按 difficulty-v1 映射为 L1～L5
+    │       ├── 逐项比对候选人原回答；明确未回答由服务端记零分
+    │       ├── 服务端确定性计算单题分；关键错误限制该题最高 69 分
+    │       └── 仅依据已计分问题生成整场总结
     │
     ├── Step 3: 解析结果 (processingStep=3)
     │   ├── 解析 JSON，保存到 interview 表和 interview_question 表

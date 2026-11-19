@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.interview.ai.audio.AudioPreprocessor;
+import com.interview.ai.dto.AsrSentence;
+import com.interview.ai.service.impl.DialogueTurnAssembler;
 import com.interview.ai.factory.AiClientFactory;
 import com.interview.common.constant.ErrorCode;
 import com.interview.common.constant.ConfigType;
@@ -594,6 +596,9 @@ public class InterviewServiceImpl implements InterviewService {
             }
             String token = UUID.randomUUID().toString();
             interview.setTranscriptSegments(objectMapper.writeValueAsString(segments));
+            interview.setDialogueTurns(objectMapper.writeValueAsString(DialogueTurnAssembler.assemble(
+                    objectMapper.convertValue(segments,
+                            new com.fasterxml.jackson.core.type.TypeReference<List<AsrSentence>>() { }))));
             interview.setTranscriptText(readable.toString());
             interview.setStatus(InterviewStatus.PROCESSING.getCode());
             interview.setProcessingStep(1);
@@ -695,6 +700,7 @@ public class InterviewServiceImpl implements InterviewService {
                 .audioDuration(interview.getAudioDuration())
                 .transcriptText(interview.getTranscriptText())
                 .transcriptSegments(parseJson(interview.getTranscriptSegments(), "句子级转写"))
+                .dialogueTurns(dialogueTurns(interview))
                 .overallScore(interview.getOverallScore())
                 .dimensionContent(interview.getDimensionContent())
                 .dimensionLogic(interview.getDimensionLogic())
@@ -706,6 +712,8 @@ public class InterviewServiceImpl implements InterviewService {
                 .weaknesses(interview.getWeaknesses())
                 .questions(questionResponses)
                 .archivedQuestions(archivedResponses)
+                .domainSummary(summarizeQuestions(questions, false))
+                .difficultySummary(summarizeQuestions(questions, true))
                 .createdAt(interview.getCreatedAt())
                 .build();
     }
@@ -715,8 +723,18 @@ public class InterviewServiceImpl implements InterviewService {
                         .id(q.getId())
                         .questionIndex(q.getQuestionIndex())
                         .questionText(q.getQuestionText())
+                        .followUpTexts(parseJson(q.getFollowUpTexts(), "追问原文"))
                         .questionType(q.getQuestionType())
+                        .domain(q.getDomain())
+                        .knowledgePoints(parseJson(q.getKnowledgePoints(), "知识点"))
+                        .questionCategory(q.getQuestionCategory())
+                        .knowledgeDepth(q.getKnowledgeDepth())
+                        .problemComplexity(q.getProblemComplexity())
+                        .difficultyLevel(q.getDifficultyLevel())
+                        .difficultyReason(q.getDifficultyReason())
+                        .difficultyRuleVersion(q.getDifficultyRuleVersion())
                         .recognitionConfidence(q.getRecognitionConfidence())
+                        .lowConfidenceReason(q.getLowConfidenceReason())
                         .includedInScore(Integer.valueOf(1).equals(q.getIncludedInScore()))
                         .questionSpeaker(q.getQuestionSpeaker())
                         .answerText(q.getAnswerText())
@@ -731,12 +749,50 @@ public class InterviewServiceImpl implements InterviewService {
                         .improvementTip(q.getImprovementTip())
                         .referenceAnswer(q.getReferenceAnswer())
                         .answerDifference(q.getAnswerDifference())
+                        .answerEvidence(parseJson(q.getAnswerEvidence(), "回答证据"))
+                        .criticalErrors(parseJson(q.getCriticalErrors(), "关键错误"))
                         .rubricDetail(parseRubricDetail(q.getRubricDetail()))
                 .build();
     }
 
     private JsonNode parseRubricDetail(String value) {
         return parseJson(value, "评分量表");
+    }
+
+    /** 历史记录没有派生列时，直接从已保存的原始句子重建；不重新调用 ASR。 */
+    private JsonNode dialogueTurns(Interview interview) {
+        JsonNode saved = parseJson(interview.getDialogueTurns(), "说话人发言");
+        if (saved != null) return saved;
+        JsonNode segments = parseJson(interview.getTranscriptSegments(), "句子级转写");
+        if (segments == null || !segments.isArray()) return objectMapper.createArrayNode();
+        try {
+            List<AsrSentence> sentences = objectMapper.convertValue(segments,
+                    new com.fasterxml.jackson.core.type.TypeReference<List<AsrSentence>>() { });
+            return objectMapper.valueToTree(DialogueTurnAssembler.assemble(sentences));
+        } catch (IllegalArgumentException e) {
+            log.warn("历史转写无法重建说话人发言: interviewId={}", interview.getId(), e);
+            return objectMapper.createArrayNode();
+        }
+    }
+
+    /** 只统计当前有效且有可靠评分的问题；同时返回样本量，避免单题均分被误作稳定能力结论。 */
+    private JsonNode summarizeQuestions(List<InterviewQuestion> questions, boolean byDifficulty) {
+        Map<String, int[]> totals = new java.util.TreeMap<>();
+        for (InterviewQuestion question : questions) {
+            if (!Integer.valueOf(1).equals(question.getIncludedInScore()) || question.getScore() == null) continue;
+            String key = byDifficulty ? question.getDifficultyLevel() : question.getDomain();
+            if (key == null || key.isBlank()) continue;
+            if (!byDifficulty && "NON_TECHNICAL".equals(key)) continue;
+            int[] values = totals.computeIfAbsent(key, ignored -> new int[2]);
+            values[0]++;
+            values[1] += question.getScore();
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        totals.forEach((key, values) -> result.set(key, objectMapper.createObjectNode()
+                .put("questionCount", values[0])
+                .put("averageScore", (int) Math.round((double) values[1] / values[0]))
+                .put("insufficientSample", values[0] < 2)));
+        return result;
     }
 
     private Interview ownedInterview(Long id, Long userId) {

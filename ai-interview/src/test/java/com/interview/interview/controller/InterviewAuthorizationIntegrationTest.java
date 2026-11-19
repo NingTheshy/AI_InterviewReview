@@ -12,6 +12,8 @@ import com.interview.common.utils.JwtUtil;
 import com.interview.common.utils.RedisUtil;
 import com.interview.interview.service.InterviewService;
 import io.jsonwebtoken.Claims;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,6 +33,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -90,6 +93,32 @@ class InterviewAuthorizationIntegrationTest {
         mockMvc.perform(get("/interviews"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("文件初始请求仍要求登录，文件错误分发不被改写成 401")
+    void fileErrorRedispatchDoesNotRepeatAuthentication() throws Exception {
+        mockMvc.perform(get("/files/audio.wav"))
+                .andExpect(status().isUnauthorized());
+
+        var result = mockMvc.perform(get("/error").with(request -> {
+            request.setDispatcherType(DispatcherType.ERROR);
+            request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, "/files/audio.wav");
+            return request;
+        })).andReturn();
+        assertNotEquals(401, result.getResponse().getStatus());
+
+        var asyncResult = mockMvc.perform(get("/files/audio.wav").with(request -> {
+            request.setDispatcherType(DispatcherType.ASYNC);
+            return request;
+        })).andReturn();
+        assertNotEquals(401, asyncResult.getResponse().getStatus());
+
+        mockMvc.perform(get("/error").with(request -> {
+            request.setDispatcherType(DispatcherType.ERROR);
+            request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, "/interviews");
+            return request;
+        })).andExpect(status().isUnauthorized());
     }
 
     @Test

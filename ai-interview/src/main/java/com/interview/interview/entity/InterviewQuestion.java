@@ -15,8 +15,18 @@ public class InterviewQuestion extends BaseEntity {
     private Long interviewId;
     private Integer questionIndex;
     private String questionText;
+    private String followUpTexts;
     private String questionType;
+    private String domain;
+    private String knowledgePoints;
+    private String questionCategory;
+    private Integer knowledgeDepth;
+    private Integer problemComplexity;
+    private String difficultyLevel;
+    private String difficultyReason;
+    private String difficultyRuleVersion;
     private String recognitionConfidence;
+    private String lowConfidenceReason;
     private Integer includedInScore;
     private String questionSpeaker;
     private String answerText;
@@ -31,6 +41,8 @@ public class InterviewQuestion extends BaseEntity {
     private String improvementTip;
     private String referenceAnswer;
     private String answerDifference;
+    private String answerEvidence;
+    private String criticalErrors;
     private String rubricDetail;
     private String questionFingerprint;
     private Integer isActive;

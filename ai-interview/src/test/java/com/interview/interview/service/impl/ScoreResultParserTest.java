@@ -34,7 +34,11 @@ class ScoreResultParserTest {
         int scorableCount = new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
                 {"overallScore":0,"dimensionContent":80,"dimensionLogic":70,
                  "dimensionExpression":60,"dimensionProfessional":90,"dimensionCommunication":50,
-                 "questions":[{"questionIndex":1,"questionText":"题目","answerText":"回答",
+                 "questions":[{"questionIndex":1,"questionText":"题目","followUpTexts":["追问"],
+                   "domain":"数据库","knowledgePoints":["索引"],"questionCategory":"原理题",
+                   "knowledgeDepth":2,"problemComplexity":3,"difficultyLevel":"L2",
+                   "difficultyReason":"需解释原理并分析场景","difficultyRuleVersion":"difficulty-v1",
+                   "answerText":"回答","answerEvidence":["回答"],"criticalErrors":["关键错误"],
                    "score":75,"referenceAnswer":"标准答案",
                    "rubricDetail":{"version":"rubric-v1","items":[{"id":"a","weight":100}]}}]}
                 """);
@@ -44,6 +48,15 @@ class ScoreResultParserTest {
         ArgumentCaptor<InterviewQuestion> saved = ArgumentCaptor.forClass(InterviewQuestion.class);
         verify(questionMapper).insert(saved.capture());
         assertEquals("标准答案", saved.getValue().getReferenceAnswer());
+        assertEquals("[\"追问\"]", saved.getValue().getFollowUpTexts());
+        assertEquals("[\"回答\"]", saved.getValue().getAnswerEvidence());
+        assertEquals("[\"关键错误\"]", saved.getValue().getCriticalErrors());
+        assertEquals("数据库", saved.getValue().getDomain());
+        assertEquals("[\"索引\"]", saved.getValue().getKnowledgePoints());
+        assertEquals(2, saved.getValue().getKnowledgeDepth());
+        assertEquals(3, saved.getValue().getProblemComplexity());
+        assertEquals("L2", saved.getValue().getDifficultyLevel());
+        assertEquals("difficulty-v1", saved.getValue().getDifficultyRuleVersion());
         assertTrue(saved.getValue().getRubricDetail().contains("rubric-v1"));
     }
 
@@ -64,6 +77,33 @@ class ScoreResultParserTest {
         ArgumentCaptor<InterviewQuestion> saved = ArgumentCaptor.forClass(InterviewQuestion.class);
         verify(questionMapper).insert(saved.capture());
         assertNull(saved.getValue().getRubricDetail());
+    }
+
+    @Test
+    void persistsLowConfidenceReasonWithoutScoringIt() {
+        Interview interview = new Interview();
+        interview.setId(10L);
+        interview.setProcessingToken("token-10");
+        interview.setTranscriptSegments("""
+                [{"text":"项目问题","speakerId":"0","speakerRole":"UNKNOWN","startTimeMs":100,"endTimeMs":900},
+                 {"text":"不确定的回答","speakerId":"1","speakerRole":"UNKNOWN","startTimeMs":1000,"endTimeMs":2000}]
+                """);
+        when(interviewMapper.selectForUpdate(10L)).thenReturn(interview);
+        when(questionMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        int count = new ScoreResultParser(interviewMapper, questionMapper).parseAndSave(interview, """
+                {"scorableQuestionCount":0,"questions":[{"questionIndex":1,"questionText":"项目问题",
+                  "answerText":"不确定的回答","recognitionConfidence":"LOW","includedInScore":false,
+                  "questionSpeakerId":"0","answerSpeakerId":"1",
+                  "lowConfidenceReason":"说话人角色无法确认","answerEvidence":[],"criticalErrors":[]}]}
+                """);
+
+        assertEquals(0, count);
+        assertNull(interview.getOverallScore());
+        assertTrue(interview.getTranscriptSegments().contains("\"speakerRole\":\"UNKNOWN\""));
+        ArgumentCaptor<InterviewQuestion> saved = ArgumentCaptor.forClass(InterviewQuestion.class);
+        verify(questionMapper).insert(saved.capture());
+        assertEquals("说话人角色无法确认", saved.getValue().getLowConfidenceReason());
     }
 
     @Test

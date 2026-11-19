@@ -16,6 +16,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -67,6 +70,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
+                    // 文件的初始 REQUEST 仍需正常授权；流式写出后的内部再次分发不重复触发认证。
+                    auth.requestMatchers(this::isFileRedispatch).permitAll();
                     auth.requestMatchers("/auth/login", "/auth/register", "/auth/send-code").permitAll();
                     auth.requestMatchers(HttpMethod.GET,
                             "/experiences", "/experiences/{id}",
@@ -95,5 +100,18 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    private boolean isFileRedispatch(HttpServletRequest request) {
+        DispatcherType type = request.getDispatcherType();
+        if (type != DispatcherType.ASYNC && type != DispatcherType.ERROR) return false;
+        Object original = type == DispatcherType.ERROR
+                ? request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI) : request.getRequestURI();
+        if (!(original instanceof String path)) return false;
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return path.startsWith("/files/") || path.startsWith("/asr-files/");
     }
 }

@@ -63,6 +63,9 @@ public class InterviewDetailResponse {
     /** 句子级转写结果，包含原始 speakerId、业务角色和毫秒级起止时间 */
     private JsonNode transcriptSegments;
 
+    /** 连续同一说话人的完整发言；原始句子仍保留在 transcriptSegments 中。 */
+    private JsonNode dialogueTurns;
+
     /** 综合评分(0-100) */
     private Integer overallScore;
 
@@ -96,6 +99,12 @@ public class InterviewDetailResponse {
     /** 重评后不再匹配的问题，仍保留其笔记与收藏关联。 */
     private List<QuestionResponse> archivedQuestions;
 
+    /** 按技术领域汇总的已计分题目均分及样本量。 */
+    private JsonNode domainSummary;
+
+    /** L1～L5 各等级的已计分题目数量和平均分。 */
+    private JsonNode difficultySummary;
+
     /** 创建时间 */
     private LocalDateTime createdAt;
 
@@ -115,9 +124,31 @@ public class InterviewDetailResponse {
         /** 问题内容 */
         private String questionText;
 
+        /** 同主题追问的原文列表。 */
+        private JsonNode followUpTexts;
+
         private String questionType;
 
+        private String domain;
+
+        private JsonNode knowledgePoints;
+
+        private String questionCategory;
+
+        private Integer knowledgeDepth;
+
+        private Integer problemComplexity;
+
+        private String difficultyLevel;
+
+        private String difficultyReason;
+
+        private String difficultyRuleVersion;
+
         private String recognitionConfidence;
+
+        /** 问答证据不足时不参与评分的原因。 */
+        private String lowConfidenceReason;
 
         private Boolean includedInScore;
 
@@ -158,6 +189,12 @@ public class InterviewDetailResponse {
         private String referenceAnswer;
 
         private String answerDifference;
+
+        /** 可在候选人原回答中逐字定位的评分证据。 */
+        private JsonNode answerEvidence;
+
+        /** 导致单题高分受限的关键错误。 */
+        private JsonNode criticalErrors;
 
         /** 新评分模式的逐要点量表；历史记录为空 */
         private JsonNode rubricDetail;

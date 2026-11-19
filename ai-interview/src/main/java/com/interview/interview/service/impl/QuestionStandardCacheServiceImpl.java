@@ -3,6 +3,8 @@ package com.interview.interview.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.interview.ai.factory.AiClientFactory;
 import com.interview.ai.service.ScoringService;
 import com.interview.common.constant.ConfigType;
@@ -24,7 +26,7 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class QuestionStandardCacheServiceImpl implements QuestionStandardCacheService {
-    private static final String PROMPT_VERSION = "rubric-v2";
+    private static final String PROMPT_VERSION = "rubric-v4";
     private static final Set<String> PERSONAL_TYPES = Set.of("PERSONAL", "PROJECT", "BEHAVIORAL");
     private final QuestionStandardCacheMapper cacheMapper;
     private final AiClientFactory aiClientFactory;
@@ -55,6 +57,7 @@ public class QuestionStandardCacheServiceImpl implements QuestionStandardCacheSe
             JsonNode questions = objectMapper.readTree(scoreResultJson).path("questions");
             if (!questions.isArray()) return;
             for (JsonNode question : questions) {
+                if (!question.path("followUpTexts").isEmpty()) continue;
                 String reference = question.path("referenceAnswer").asText("");
                 JsonNode rubric = question.path("rubricDetail");
                 if (reference.isBlank() || !rubric.isObject()) continue;
@@ -62,7 +65,9 @@ public class QuestionStandardCacheServiceImpl implements QuestionStandardCacheSe
                 boolean personal = PERSONAL_TYPES.contains(type);
                 String normalizedQuestion = normalize(question.path("questionText").asText());
                 String context = normalizedQuestion + '|' + normalize(interview.getPositionTitle()) + '|'
-                        + normalize(interview.getCompanyName()) + '|' + model.provider() + '|' + model.modelName()
+                        + normalize(interview.getIndustry()) + '|'
+                        + sha256(interview.getJdText() == null ? "" : interview.getJdText())
+                        + '|' + model.provider() + '|' + model.modelName()
                         + '|' + model.version() + '|' + PROMPT_VERSION
                         + (personal ? '|' + interview.getUserId() + '|' + interview.getId() + '|' + interview.getResumeId() : "");
                 String key = sha256(context);
@@ -74,7 +79,27 @@ public class QuestionStandardCacheServiceImpl implements QuestionStandardCacheSe
                 if (personal) { value.setUserId(interview.getUserId()); value.setInterviewId(interview.getId()); value.setResumeId(interview.getResumeId()); }
                 value.setProvider(model.provider()); value.setModelName(model.modelName()); value.setConfigVersion(model.version());
                 value.setPromptVersion(PROMPT_VERSION); value.setReferenceAnswer(reference);
-                value.setRubricDetail(objectMapper.writeValueAsString(rubric)); cacheMapper.insert(value);
+                // 通用缓存可跨用户复用，只保存标准，不复制当前候选人的证据与错误。
+                ObjectNode standard = objectMapper.createObjectNode();
+                standard.put("version", PROMPT_VERSION);
+                for (String field : List.of("domain", "questionCategory", "difficultyReason")) {
+                    standard.put(field, rubric.path(field).asText());
+                }
+                standard.set("knowledgePoints", rubric.path("knowledgePoints").deepCopy());
+                standard.put("knowledgeDepth", rubric.path("knowledgeDepth").asInt());
+                standard.put("problemComplexity", rubric.path("problemComplexity").asInt());
+                standard.set("context", rubric.path("context").deepCopy());
+                standard.set("keyPoints", rubric.path("keyPoints").deepCopy());
+                ArrayNode items = standard.putArray("items");
+                for (JsonNode item : rubric.path("items")) {
+                    items.add(objectMapper.createObjectNode()
+                            .put("id", item.path("id").asText())
+                            .put("dimension", item.path("dimension").asText())
+                            .put("title", item.path("title").asText())
+                            .put("weight", item.path("weight").asInt())
+                            .put("fullCreditCriteria", item.path("fullCreditCriteria").asText()));
+                }
+                value.setRubricDetail(objectMapper.writeValueAsString(standard)); cacheMapper.insert(value);
             }
         } catch (Exception e) {
             throw new IllegalStateException("标准答案缓存保存失败", e);

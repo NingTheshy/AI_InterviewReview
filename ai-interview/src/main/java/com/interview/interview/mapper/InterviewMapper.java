@@ -93,7 +93,7 @@ public interface InterviewMapper extends BaseMapper<Interview> {
     int physicallyDeleteShares(@Param("interviewId") Long interviewId);
 
     @Update("UPDATE interview SET audio_file_path=NULL, audio_file_size=NULL, resume_file_path=NULL, resume_text=NULL, " +
-            "jd_text=NULL, transcript_text=NULL, transcript_segments=NULL, overall_score=NULL, dimension_content=NULL, " +
+            "jd_text=NULL, transcript_text=NULL, transcript_segments=NULL, dialogue_turns=NULL, overall_score=NULL, dimension_content=NULL, " +
             "dimension_logic=NULL, dimension_expression=NULL, dimension_professional=NULL, dimension_communication=NULL, " +
             "improvement_summary=NULL, strengths=NULL, weaknesses=NULL, asr_config_snapshot=NULL, llm_config_snapshot=NULL, " +
             "resume_id=NULL, purged_at=NOW() WHERE id=#{id} AND deleted=1")

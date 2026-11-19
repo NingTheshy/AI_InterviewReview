@@ -8,6 +8,8 @@ import com.interview.ai.dto.AsrTranscriptionContext;
 import com.interview.ai.dto.TranscriptionResult;
 import com.interview.ai.service.CompanyClassifier;
 import com.interview.ai.service.ScoringService;
+import com.interview.ai.service.impl.SpeakerRoleResolver;
+import com.interview.ai.service.impl.DialogueTurnAssembler;
 import com.interview.ai.service.TranscriptionService;
 import com.interview.common.constant.CompanyTier;
 import com.interview.common.constant.ErrorCode;
@@ -51,6 +53,7 @@ public class InterviewAsyncServiceImpl implements InterviewAsyncService {
     private final InterviewQuestionMapper questionMapper;
     private final TranscriptionService transcriptionService;
     private final ScoringService scoringService;
+    private final SpeakerRoleResolver speakerRoleResolver;
     private final CompanyClassifier companyClassifier;
     private final ScoreResultParser scoreResultParser;
     private final QuestionStandardCacheService standardCacheService;
@@ -121,10 +124,27 @@ public class InterviewAsyncServiceImpl implements InterviewAsyncService {
                 assertOwnership(interviewId, processingToken);
                 interview.setTranscriptText(transcript);
                 interview.setTranscriptSegments(objectMapper.writeValueAsString(transcription.sentences()));
+                interview.setDialogueTurns(objectMapper.writeValueAsString(
+                        DialogueTurnAssembler.assemble(transcription.sentences())));
                 interview.setAudioDuration(transcription.audioDurationSeconds());
                 interviewMapper.updateById(interview);
                 log.info("语音转文字完成: interviewId={}, 长度={}, 句子数={}",
                         interviewId, transcript.length(), transcription.sentences().size());
+            }
+
+            // ASR 只有匿名 speakerId；尽早解析业务角色，使轮询中的转写也能显示面试官/应聘者。
+            if (transcription.sentences().stream().map(AsrSentence::speakerId).filter(java.util.Objects::nonNull)
+                    .distinct().limit(3).count() == 2
+                    && transcription.sentences().stream().anyMatch(sentence -> "UNKNOWN".equals(sentence.speakerRole()))) {
+                TranscriptionResult currentTranscription = transcription;
+                transcription = withLeaseRenewal(interviewId, processingToken,
+                        () -> speakerRoleResolver.resolve(currentTranscription, interview.getLlmConfigSnapshot()));
+                assertOwnership(interviewId, processingToken);
+                interview.setTranscriptText(transcription.text());
+                interview.setTranscriptSegments(objectMapper.writeValueAsString(transcription.sentences()));
+                interview.setDialogueTurns(objectMapper.writeValueAsString(
+                        DialogueTurnAssembler.assemble(transcription.sentences())));
+                interviewMapper.updateById(interview);
             }
 
             // 步骤 1.5: 公司分级
@@ -140,8 +160,9 @@ public class InterviewAsyncServiceImpl implements InterviewAsyncService {
             String jdText = interview.getJdText();
             String resumeText = interview.getResumeText();
             List<ScoringService.SavedRubric> savedRubrics = standardCacheService.load(interview);
+            TranscriptionResult transcriptionForScoring = transcription;
             String scoreResult = withLeaseRenewal(interviewId, processingToken, () ->
-                    scoringService.analyzeWithRubricSnapshot(transcription.toScoringTranscript(), jdText, resumeText,
+                    scoringService.analyzeWithRubricSnapshot(transcriptionForScoring.toScoringTranscript(), jdText, resumeText,
                             interview.getPositionTitle(), interview.getCompanyName(), interview.getIndustry(), tier.getCode(),
                             interview.getLlmConfigSnapshot(), savedRubrics));
             standardCacheService.save(interview, scoreResult);
@@ -187,14 +208,26 @@ public class InterviewAsyncServiceImpl implements InterviewAsyncService {
                     new TypeReference<List<AsrSentence>>() { });
             TranscriptionResult transcription = new TranscriptionResult(interview.getTranscriptText(), sentences,
                     interview.getAudioDuration());
+            if (sentences.stream().map(AsrSentence::speakerId).filter(java.util.Objects::nonNull)
+                    .distinct().limit(3).count() == 2
+                    && sentences.stream().anyMatch(sentence -> "UNKNOWN".equals(sentence.speakerRole()))) {
+                transcription = withLeaseRenewal(interviewId, processingToken,
+                        () -> speakerRoleResolver.resolve(new TranscriptionResult(interview.getTranscriptText(), sentences,
+                                interview.getAudioDuration()), interview.getLlmConfigSnapshot()));
+                interview.setTranscriptText(transcription.text());
+                interview.setTranscriptSegments(objectMapper.writeValueAsString(transcription.sentences()));
+                interview.setDialogueTurns(objectMapper.writeValueAsString(
+                        DialogueTurnAssembler.assemble(transcription.sentences())));
+            }
             heartbeat(interviewId, processingToken);
             CompanyTier tier = withLeaseRenewal(interviewId, processingToken, () ->
                     companyClassifier.classify(interview.getCompanyName(), interview.getIndustry(), interview.getJdText()));
             interview.setCompanyTier(tier.getCode());
             updateStep(interview, 2, processingToken);
             List<ScoringService.SavedRubric> savedRubrics = standardCacheService.load(interview);
+            TranscriptionResult transcriptionForScoring = transcription;
             String scoreResult = withLeaseRenewal(interviewId, processingToken, () ->
-                    scoringService.analyzeWithRubricSnapshot(transcription.toScoringTranscript(), interview.getJdText(),
+                    scoringService.analyzeWithRubricSnapshot(transcriptionForScoring.toScoringTranscript(), interview.getJdText(),
                             interview.getResumeText(), interview.getPositionTitle(), interview.getCompanyName(), interview.getIndustry(), tier.getCode(),
                             interview.getLlmConfigSnapshot(), savedRubrics));
             standardCacheService.save(interview, scoreResult);

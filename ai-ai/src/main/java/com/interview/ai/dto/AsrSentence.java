@@ -18,13 +18,20 @@ public record AsrSentence(
         String speakerRole,
         long startTimeMs,
         long endTimeMs,
-        List<AsrWord> words
+        List<AsrWord> words,
+        Integer transcriptIndex
 ) {
 
     public static final String UNKNOWN_ROLE = "UNKNOWN";
 
     public AsrSentence {
         words = words == null ? List.of() : List.copyOf(words);
+        transcriptIndex = transcriptIndex == null ? 0 : transcriptIndex;
+    }
+
+    public AsrSentence(String text, String speakerId, String speakerRole, long startTimeMs, long endTimeMs,
+                       List<AsrWord> words) {
+        this(text, speakerId, speakerRole, startTimeMs, endTimeMs, words, 0);
     }
 
     /** 保留旧调用点的兼容构造器；新增转写结果应优先传入词级时间戳。 */
@@ -33,6 +40,6 @@ public record AsrSentence(
     }
 
     public AsrSentence withSpeakerRole(String role) {
-        return new AsrSentence(text, speakerId, role, startTimeMs, endTimeMs, words);
+        return new AsrSentence(text, speakerId, role, startTimeMs, endTimeMs, words, transcriptIndex);
     }
 }

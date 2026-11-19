@@ -95,7 +95,7 @@
 | 基本信息 | title、company_name、position_title、industry、company_tier、interview_type | 类型限定为 coding、behavioral、system_design、comprehensive |
 | 简历/JD | resume_id、resume_file_path、resume_text、jd_text | resume_id 绑定简历版本；正文和路径作为历史不可变快照 |
 | 音频 | audio_file_path、audio_file_size、audio_duration | MP3/WAV，最大 2GB、最长 2 小时 |
-| 转写 | transcript_text、transcript_segments | 完整文本及句子级 JSON；保存句子/词毫秒时间戳、speakerId 和角色 |
+| 转写 | transcript_text、transcript_segments、dialogue_turns | 完整文本、原始句子级 JSON 和按连续说话人合并的发言 JSON；保留句子/词毫秒时间戳、speakerId、角色及原始句子索引 |
 | 评分 | overall_score、五个 dimension_*、improvement_summary、strengths、weaknesses | 面试汇总结果 |
 | 状态机 | status、processing_step、last_error_code、error_message | 状态：处理中、完成、失败、取消；阶段：未开始、转写、问答评分、保存、总结 |
 | 任务可靠性 | processing_token、lease_expires_at、heartbeat_at | 防重复、续租、接管和旧线程回写保护 |
@@ -110,10 +110,10 @@ processing_guard 是生成列。唯一索引 (user_id, processing_guard) 保证�
 | 字段组 | 字段 | 约束与用途 |
 | --- | --- | --- |
 | 定位 | id、interview_id、question_index | 面试内问题序号 |
-| 问答 | question_text、answer_text、question_speaker、answer_speaker、start_time、end_time | 完整问答和秒级范围 |
-| 识别 | question_type、recognition_confidence、included_in_score | 题型、置信度及是否计分 |
-| 评分 | score、五个 dimension_*、improvement_tip | 逐题及维度评分 |
-| 对比 | reference_answer、answer_difference、rubric_detail | 满分答案、关键差距和 Rubric JSON |
+| 问答 | question_text、follow_up_texts、answer_text、question_speaker、answer_speaker、start_time、end_time | 主问题、追问 JSON、完整回答和秒级范围 |
+| 识别 | question_type、recognition_confidence、low_confidence_reason、included_in_score | 题型、置信度、不计分原因及是否计分 |
+| 评分 | score、四个 dimension_*、improvement_tip | 逐题及维度评分；整场沟通分保存在 interview 表 |
+| 对比 | reference_answer、answer_difference、answer_evidence、critical_errors、rubric_detail | 口述范例、关键差距、原文证据与关键错误 JSON、Rubric JSON |
 | 稳定关联 | question_fingerprint、is_active、archived_at | 重评时匹配原问题；未匹配问题归档以保留笔记和收藏 |
 
 ### 4.5 interview_note
@@ -152,7 +152,7 @@ note_type=INTERVIEW 时 question_id=0，每场面试保存一条 Markdown 总笔
 | 模型版本 | provider、model_name、config_version、prompt_version | 模型或提示词变化后自然隔离 |
 | 内容 | reference_answer、rubric_detail | 标准答案和评分量表 JSON |
 
-技术/客观题不写入简历上下文；个人、项目和行为题不得跨用户、面试或简历版本复用。
+技术/客观题不写入简历上下文；个人、项目和行为题不得跨用户、面试或简历版本复用。缓存键包含 JD 摘要、岗位、行业、模型及 `rubric-v4` 提示词版本；公司信息不参与标准和难度。题目表新增技术领域、知识点、细分题型、K/C、L、难度理由和规则版本字段。完整规则见《统一题目难度评价规范》。
 
 ### 4.10 ai_config
 

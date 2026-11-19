@@ -10,6 +10,8 @@ import com.interview.common.constant.ScoringWeights;
 import com.interview.common.exception.BusinessException;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewQuestion;
+import com.interview.ai.dto.AsrSentence;
+import com.interview.ai.service.impl.DialogueTurnAssembler;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewQuestionMapper;
 import lombok.RequiredArgsConstructor;
@@ -116,8 +118,18 @@ public class ScoreResultParser {
                     question.setInterviewId(interview.getId());
                     question.setQuestionIndex(getInt(qNode, "questionIndex"));
                     question.setQuestionText(getText(qNode, "questionText"));
+                    question.setFollowUpTexts(jsonArray(qNode, "followUpTexts"));
                     question.setQuestionType(getText(qNode, "questionType"));
+                    question.setDomain(getText(qNode, "domain"));
+                    question.setKnowledgePoints(jsonArray(qNode, "knowledgePoints"));
+                    question.setQuestionCategory(getText(qNode, "questionCategory"));
+                    question.setKnowledgeDepth(getInt(qNode, "knowledgeDepth"));
+                    question.setProblemComplexity(getInt(qNode, "problemComplexity"));
+                    question.setDifficultyLevel(getText(qNode, "difficultyLevel"));
+                    question.setDifficultyReason(getText(qNode, "difficultyReason"));
+                    question.setDifficultyRuleVersion(getText(qNode, "difficultyRuleVersion"));
                     question.setRecognitionConfidence(getText(qNode, "recognitionConfidence"));
+                    question.setLowConfidenceReason(getText(qNode, "lowConfidenceReason"));
                     boolean includedInScore = qNode.has("includedInScore")
                             ? qNode.path("includedInScore").asBoolean(false) : true;
                     question.setIncludedInScore(includedInScore ? 1 : 0);
@@ -134,6 +146,8 @@ public class ScoreResultParser {
                     question.setImprovementTip(getText(qNode, "improvementTip"));
                     question.setReferenceAnswer(getText(qNode, "referenceAnswer"));
                     question.setAnswerDifference(getText(qNode, "answerDifference"));
+                    question.setAnswerEvidence(jsonArray(qNode, "answerEvidence"));
+                    question.setCriticalErrors(jsonArray(qNode, "criticalErrors"));
                     if (question.getAnswerDifference() == null || question.getAnswerDifference().isBlank()) {
                         question.setAnswerDifference(deriveAnswerDifference(qNode));
                     }
@@ -251,6 +265,13 @@ public class ScoreResultParser {
         return value.asText(null);
     }
 
+    private String jsonArray(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        if (value.isMissingNode() || value.isNull()) return null;
+        if (!value.isArray()) throw new IllegalArgumentException(field + " 必须是 JSON 数组");
+        return value.toString();
+    }
+
     /** 读取可选整数，异常格式不抛出解析器底层异常，交由后续业务字段校验处理。 */
     private Integer getInt(JsonNode node, String field) {
         JsonNode value = node.path(field);
@@ -281,15 +302,21 @@ public class ScoreResultParser {
 
         Map<String, int[]> votes = new HashMap<>();
         for (JsonNode question : questionsNode) {
+            if ("LOW".equals(question.path("recognitionConfidence").asText())) continue;
             addRoleVote(votes, getText(question, "questionSpeakerId"), true);
             addRoleVote(votes, getText(question, "answerSpeakerId"), false);
         }
 
         Set<String> allSpeakerIds = new HashSet<>();
+        Map<String, String> existingRoles = new HashMap<>();
         for (JsonNode segment : segments) {
             String speakerId = getText(segment, "speakerId");
             if (speakerId != null) {
                 allSpeakerIds.add(speakerId);
+                String role = getText(segment, "speakerRole");
+                if ("INTERVIEWER".equals(role) || "CANDIDATE".equals(role)) {
+                    existingRoles.put(speakerId, role);
+                }
             }
         }
 
@@ -301,7 +328,7 @@ public class ScoreResultParser {
             } else if (counts[1] > counts[0]) {
                 roles.put(speakerId, "CANDIDATE");
             } else {
-                roles.put(speakerId, "UNKNOWN");
+                roles.put(speakerId, existingRoles.getOrDefault(speakerId, "UNKNOWN"));
             }
         }
         completeTwoSpeakerMapping(roles);
@@ -321,6 +348,8 @@ public class ScoreResultParser {
                     .append(getText(segment, "text"));
         }
         interview.setTranscriptSegments(objectMapper.writeValueAsString(segments));
+        interview.setDialogueTurns(objectMapper.writeValueAsString(DialogueTurnAssembler.assemble(
+                objectMapper.convertValue(segments, new com.fasterxml.jackson.core.type.TypeReference<List<AsrSentence>>() { }))));
         if (readableTranscript.length() > 0) {
             interview.setTranscriptText(readableTranscript.toString());
         }
