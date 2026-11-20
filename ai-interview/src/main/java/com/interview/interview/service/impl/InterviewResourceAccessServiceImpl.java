@@ -5,10 +5,8 @@ import com.interview.common.constant.ErrorCode;
 import com.interview.common.exception.BusinessException;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewQuestion;
-import com.interview.interview.entity.InterviewExperience;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewQuestionMapper;
-import com.interview.interview.mapper.InterviewExperienceMapper;
 import com.interview.interview.service.InterviewResourceAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,7 +18,6 @@ public class InterviewResourceAccessServiceImpl implements InterviewResourceAcce
 
     private final InterviewMapper interviewMapper;
     private final InterviewQuestionMapper questionMapper;
-    private final InterviewExperienceMapper experienceMapper;
 
     @Override
     public void requireOwnedInterview(Long interviewId, Long userId) {
@@ -39,19 +36,8 @@ public class InterviewResourceAccessServiceImpl implements InterviewResourceAcce
 
     @Override
     public void requireVisibleInterview(Long interviewId, Long userId) {
-        Interview interview = requireInterview(interviewId);
-        if (userId != null && userId.equals(interview.getUserId())) {
-            return;
-        }
-
-        LambdaQueryWrapper<InterviewExperience> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InterviewExperience::getInterviewId, interviewId)
-                .eq(InterviewExperience::getPublishStatus, InterviewExperience.PUBLISHED)
-                .eq(InterviewExperience::getModerationStatus, InterviewExperience.NORMAL);
-        if (experienceMapper.selectCount(wrapper) == 0) {
-            throw new BusinessException(ErrorCode.INTERVIEW_ACCESS_DENIED.getCode(),
-                    ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
-        }
+        // 公开面经只开放独立快照。原面试问题和私人题目收藏仍只属于面试所有者。
+        requireOwnedInterview(interviewId, userId);
     }
 
     @Override

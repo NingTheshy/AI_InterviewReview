@@ -29,8 +29,6 @@ public class InterviewCleanupService {
     public void purgeInterview(Interview interview) {
         interviewMapper.physicallyDeleteNotes(interview.getId());
         interviewMapper.physicallyDeleteFavorites(interview.getId());
-        interviewMapper.physicallyDeleteComments(interview.getId());
-        interviewMapper.physicallyDeleteShares(interview.getId());
         interviewMapper.physicallyDeleteQuestions(interview.getId());
         standardCacheMapper.deletePersonalByInterview(interview.getId());
         interviewMapper.markPurged(interview.getId());

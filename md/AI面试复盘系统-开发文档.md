@@ -8,7 +8,7 @@
 
 > AI 技术栈更新：文本模型只保留 DeepSeek，并通过 Spring AI `ChatModel` 调用；ASR provider 统一为 DashScope，自定义 Spring AI `TranscriptionModel` 支持千问 Audio 3.1 主模型和 Paraformer-v2 备选模型。FunASR 仅表示模型集合，不是具体模型。
 
-> 面试闭环更新：简历改为 `/resumes` 独立异步解析；面试创建只传 `resumeId`。音频上限为 2GB/2 小时。任务支持取消、阶段重试、重评与租约接管；私密分享已移除，统一使用 `/interviews/{id}/publication` 和 `/experiences/{id}` 公开面经接口。后续旧章节若冲突，以本段、README 和当前源码为准。
+> 面试闭环更新：简历改为 `/resumes` 独立异步解析；面试创建只传 `resumeId`。音频上限为 2GB/2 小时。公开面经从已完成面试逐题选择，保存独立题目与答案快照；`/interviews/{id}/publication` 发起发布，`/me/experiences/{id}` 管理本人面经，`/experiences/{id}` 只读公开快照。原面试重评或删除不自动撤下面经，作者删帖后新发布生成新 ID 并清空互动。后续旧章节若冲突，以本段、README 和当前源码为准。
 
 ---
 
@@ -28,7 +28,7 @@
 | 面试复盘 | 逐题评分卡片、雷达图、参考答案 |
 | 用户笔记 | 面试笔记、问题笔记 |
 | 问题收藏 | 收藏典型问题，便于反复学习 |
-| 面试分享 | 生成分享链接 / 发布面经 |
+| 面经发布 | 逐题选择、预览并发布面经 |
 | 面经广场 | 公开面经浏览、评论互动 |
 | 管理后台 | 用户管理、系统统计、AI 模型配置 |
 
@@ -387,11 +387,14 @@ logging:
 | interview_favorite | 问题收藏表 |
 | question_standard_cache | 标准答案与评分量表缓存表 |
 
-**面经与评论（2 张表）：**
+**面经与评论（5 张表）：**
 
 | 表名 | 说明 |
 |------|------|
-| interview_experience | 每场面试唯一的公开面经发布记录 |
+| interview_experience | 同场同时最多一篇已发布面经，历史删除记录保留 |
+| experience_question_snapshot | 发布题目及标准答案的独立快照 |
+| experience_like | 登录用户面经点赞 |
+| experience_favorite | 登录用户面经收藏 |
 | interview_comment | 面经评论表 |
 
 **AI 配置（1 张表）：**
@@ -413,9 +416,10 @@ user (用户)
   │     ├── interview_note (一条总笔记及各问题笔记)
   │     │ 1:N
   │     ├── interview_favorite (问题收藏)
-  │     │ 1:1
-  │     └── interview_experience (公开面经)
-  │           │ 1:N
+  │     │ 1:N（同场同时最多一篇已发布）
+  │     └── interview_experience (独立公开面经)
+  │           ├── experience_question_snapshot (题目与答案快照)
+  │           ├── experience_like / experience_favorite (互动)
   │           └── interview_comment (面经评论)
   │
   └── user_role (用户角色关联)
@@ -980,14 +984,20 @@ LLM 只保留 DeepSeek，不开放其他文本 provider。ASR provider 固定为
 
 | 方法 | 路径 | 说明 | 认证 |
 |------|------|------|------|
-| POST/GET/PUT/DELETE | /interviews/{id}/publication | 发布、读取、修改或撤回本人公开面经 | 是 |
+| POST/GET | /interviews/{id}/publication | 发布、读取本人当前公开面经 | 是 |
+| GET | /interviews/{id}/publication/candidates | 私有候选题与编辑数据 | 是 |
+| GET | /me/experiences | 我的面经，包括已删除历史 | 是 |
+| GET/PUT/DELETE | /me/experiences/{id} | 按面经 ID 查看编辑数据、编辑或删除 | 是 |
+| GET | /me/experience-favorites | 收藏的面经 | 是 |
+| POST/DELETE | /experiences/{id}/like | 点赞或取消点赞 | 是 |
+| POST/DELETE | /experiences/{id}/favorite | 收藏或取消收藏 | 是 |
 | GET | /experiences/{id} | 查看可见公开面经 | 否 |
 | GET | /experiences | 面经广场列表 | 否 |
 | GET | /experiences/{id}/comments | 评论列表 | 否 |
 | POST | /experiences/{id}/comments | 发表评论 | 是 |
 | DELETE | /comments/{id} | 删除评论 | 是 |
 
-系统不再生成私密分享链接或 Token。每场已完成面试最多对应一篇数字 ID 面经；用户可撤回后重新发布，管理员下架后仅管理员能够解除限制。
+发布请求包含标题、所选题目 ID、整篇答案开关和逐题敏感内容确认。旧面经快照重发时还可提供 `sourceExperienceId`。每场面试同时最多一篇公开面经；作者删除后旧 ID 失效，重发生成新 ID；管理员下架仅能由管理员解除。
 
 ### 9.6 管理模块 (ai-admin)
 

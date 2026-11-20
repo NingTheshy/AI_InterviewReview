@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 @Builder
 public class ExperienceManagementResponse {
 
-    /** 分享记录 ID */
+    /** 面经 ID */
     private Long id;
 
     /** 面试 ID */
@@ -30,7 +30,11 @@ public class ExperienceManagementResponse {
 
     private String publishStatus;
     private String moderationStatus;
-    private String summaryMarkdown;
+    /** 公开标题 */
+    private String title;
+
+    /** 岗位快照 */
+    private String positionTitle;
 
     /** 浏览量 */
     private Integer viewCount;

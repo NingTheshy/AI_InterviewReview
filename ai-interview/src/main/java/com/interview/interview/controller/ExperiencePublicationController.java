@@ -4,6 +4,7 @@ import com.interview.common.result.Result;
 import com.interview.common.utils.SecurityUtils;
 import com.interview.interview.dto.ExperiencePublicationRequest;
 import com.interview.interview.dto.ExperiencePublicationResponse;
+import com.interview.interview.dto.ExperienceEditorResponse;
 import com.interview.interview.service.ExperienceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +22,12 @@ public class ExperiencePublicationController {
     @PostMapping
     public Result<ExperiencePublicationResponse> publish(@PathVariable Long interviewId,
             @Valid @RequestBody ExperiencePublicationRequest request) {
-        return Result.success(experienceService.publish(interviewId, SecurityUtils.getCurrentUserId(), request.getSummaryMarkdown()));
+        return Result.success(experienceService.publish(interviewId, SecurityUtils.getCurrentUserId(), request));
+    }
+
+    @GetMapping("/candidates")
+    public Result<ExperienceEditorResponse> candidates(@PathVariable Long interviewId) {
+        return Result.success(experienceService.editor(interviewId, SecurityUtils.getCurrentUserId()));
     }
 
     @GetMapping
@@ -29,15 +35,4 @@ public class ExperiencePublicationController {
         return Result.success(experienceService.getPublication(interviewId, SecurityUtils.getCurrentUserId()));
     }
 
-    @PutMapping
-    public Result<ExperiencePublicationResponse> update(@PathVariable Long interviewId,
-            @Valid @RequestBody ExperiencePublicationRequest request) {
-        return Result.success(experienceService.updatePublication(interviewId, SecurityUtils.getCurrentUserId(), request.getSummaryMarkdown()));
-    }
-
-    @DeleteMapping
-    public Result<Void> withdraw(@PathVariable Long interviewId) {
-        experienceService.withdraw(interviewId, SecurityUtils.getCurrentUserId());
-        return Result.success();
-    }
 }

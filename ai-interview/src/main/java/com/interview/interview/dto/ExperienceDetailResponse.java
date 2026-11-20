@@ -9,67 +9,35 @@ import java.util.List;
 /**
  * 面经详情响应 DTO
  * <p>
- * 对应需求文档 4.6 节"面经详情响应"，包含面试基本信息、
- * 评分维度、问题列表和 AI 改进建议。不包含音频、转写文本和个人笔记。
+ * 仅返回作者选定的题目快照及按整篇开关允许公开的标准答案。
+ * 不返回原面试评分、候选人回答或其他私人复盘数据。
  * </p>
  */
 @Data
 @Builder
 public class ExperienceDetailResponse {
 
-    /** 分享 Token */
+    /** 公开面经数字 ID */
     private Long id;
     private String authorNickname;
     private String authorAvatar;
-    private String summaryMarkdown;
 
-    /** 面试标题 */
+    /** 面经标题 */
     private String title;
-
-    /** 公司名称 */
-    private String companyName;
 
     /** 职位名称 */
     private String positionTitle;
-
-    /** 行业 */
-    private String industry;
-
-    /** 面试类型 */
-    private String interviewType;
-
-    /** 整体评分(0-100) */
-    private Integer overallScore;
-
-    /** 内容质量维度评分(0-100) */
-    private Integer dimensionContent;
-
-    /** 逻辑性维度评分(0-100) */
-    private Integer dimensionLogic;
-
-    /** 表达能力维度评分(0-100) */
-    private Integer dimensionExpression;
-
-    /** 专业度维度评分(0-100) */
-    private Integer dimensionProfessional;
-
-    /** 沟通技巧维度评分(0-100) */
-    private Integer dimensionCommunication;
-
-    /** 整体改进建议 */
-    private String improvementSummary;
-
-    /** 候选人优势总结 */
-    private String strengths;
-
-    /** 需要提升的方面 */
-    private String weaknesses;
 
     /** 问题列表 */
     private List<QuestionItem> questions;
 
     /** 浏览量 */
     private Integer viewCount;
+    private Integer likeCount;
+    private Integer favoriteCount;
+    private Integer commentCount;
+    private Boolean liked;
+    private Boolean favorited;
 
     /** 发布时间 */
     private LocalDateTime publishedAt;
@@ -83,9 +51,6 @@ public class ExperienceDetailResponse {
         private Long id;
         private Integer questionIndex;
         private String questionText;
-        private Integer score;
-        private String answerDifference;
-        private String improvementTip;
         private String referenceAnswer;
     }
 }

@@ -344,7 +344,6 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(),
                     ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
         }
-        experienceService.withdrawForInterview(id);
         log.info("删除面试记录: id={}, userId={}", id, userId);
     }
 
@@ -499,7 +498,6 @@ public class InterviewServiceImpl implements InterviewService {
         if (!Integer.valueOf(InterviewStatus.COMPLETED.getCode()).equals(interview.getStatus())) {
             throw badRequest("只有已完成面试可以重新分析");
         }
-        experienceService.withdrawForInterview(id);
         startReanalysis(interview);
     }
 
@@ -608,7 +606,6 @@ public class InterviewServiceImpl implements InterviewService {
             interview.setReanalysisStatus("PROCESSING");
             interview.setReanalysisError(null);
             interview.setLlmConfigSnapshot(aiClientFactory.snapshotDefault(ConfigType.LLM));
-            experienceService.withdrawForInterview(id);
             interviewMapper.updateById(interview);
             submitReanalysisAfterCommit(id, token);
         } catch (BusinessException e) {

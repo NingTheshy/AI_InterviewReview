@@ -203,17 +203,54 @@ CREATE TABLE `interview_experience` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '面经ID',
     `interview_id` BIGINT NOT NULL COMMENT '面试记录ID',
     `user_id` BIGINT NOT NULL COMMENT '发布者用户ID',
-    `summary_markdown` LONGTEXT COMMENT '发布者经验总结Markdown，最多10000字',
-    `publish_status` VARCHAR(20) NOT NULL DEFAULT 'PUBLISHED' COMMENT '用户发布状态: PUBLISHED/WITHDRAWN',
+    `title` VARCHAR(200) NOT NULL COMMENT '公开面经标题',
+    `position_title` VARCHAR(200) NOT NULL COMMENT '公开岗位快照',
+    `show_answers` TINYINT NOT NULL DEFAULT 0 COMMENT '整篇是否公开标准答案',
+    `publish_status` VARCHAR(20) NOT NULL DEFAULT 'PUBLISHED' COMMENT 'PUBLISHED/DELETED',
     `moderation_status` VARCHAR(20) NOT NULL DEFAULT 'NORMAL' COMMENT '治理状态: NORMAL/BLOCKED',
     `published_at` DATETIME COMMENT '最近发布时间',
     `view_count` INT DEFAULT 0 COMMENT '浏览量',
+    `like_count` INT NOT NULL DEFAULT 0 COMMENT '点赞数',
+    `favorite_count` INT NOT NULL DEFAULT 0 COMMENT '收藏数',
+    `active_interview_id` BIGINT GENERATED ALWAYS AS (CASE WHEN `publish_status`='PUBLISHED' THEN `interview_id` ELSE NULL END) STORED,
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    UNIQUE INDEX `uk_experience_interview` (`interview_id`),
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE INDEX `uk_experience_active_interview` (`active_interview_id`),
     INDEX `idx_experience_user` (`user_id`),
     INDEX `idx_experience_visible` (`publish_status`, `moderation_status`, `published_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公开面经发布表';
+
+CREATE TABLE `experience_question_snapshot` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `experience_id` BIGINT NOT NULL,
+    `source_question_id` BIGINT NOT NULL,
+    `question_index` INT NOT NULL,
+    `question_text` TEXT NOT NULL,
+    `reference_answer` LONGTEXT,
+    `question_type` VARCHAR(20),
+    `selected` TINYINT NOT NULL DEFAULT 1,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE INDEX `uk_experience_source_question` (`experience_id`, `source_question_id`),
+    INDEX `idx_experience_question` (`experience_id`, `selected`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面经独立题目快照';
+
+CREATE TABLE `experience_like` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `experience_id` BIGINT NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE INDEX `uk_experience_like_user` (`experience_id`, `user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面经点赞';
+
+CREATE TABLE `experience_favorite` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `experience_id` BIGINT NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE INDEX `uk_experience_favorite_user` (`experience_id`, `user_id`),
+    INDEX `idx_experience_favorite_user` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面经收藏';
 
 -- -----------------------------------------------------------
 -- 8. 面经评论表

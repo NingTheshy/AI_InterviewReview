@@ -130,18 +130,18 @@ note_type=INTERVIEW 时 question_id=0，每场面试保存一条 Markdown 总笔
 
 | 字段 | 说明 |
 | --- | --- |
-| interview_id | 唯一索引；每场面试最多一篇面经 |
+| interview_id、active_interview_id | 同场同时最多一篇已发布面经；历史删除记录保留以生成新 ID 和保持管理员封禁 |
 | user_id | 发布者 |
-| summary_markdown | 最多 10,000 字的经验总结源文本 |
-| publish_status | 用户状态：PUBLISHED / WITHDRAWN |
+| title、position_title、show_answers | 公开标题、岗位快照和整篇答案可见性 |
+| publish_status | 用户状态：PUBLISHED / DELETED |
 | moderation_status | 管理状态：NORMAL / BLOCKED |
-| published_at、view_count | 最近发布时间和浏览量 |
+| published_at、view_count、like_count、favorite_count | 发布时间和互动计数 |
 
-面经仅在 publish_status=PUBLISHED 且 moderation_status=NORMAL 时公开。管理员下架后，用户不能自行解除 BLOCKED。面试删除或发起重新分析时自动撤回，恢复或重评完成后不自动重新发布。
+面经仅在 publish_status=PUBLISHED 且 moderation_status=NORMAL 时公开。管理员下架后，用户不能通过删除重发解除 BLOCKED。`experience_question_snapshot` 保存已收录题目与答案的私有快照；公开接口只读取所选题，并按 show_answers 决定是否返回答案。`experience_like` 和 `experience_favorite` 按面经与用户唯一，独立于私人问题收藏。原面试删除或重评不改变已发布快照。
 
 ### 4.8 interview_comment
 
-评论通过 experience_id 关联面经，内容最大 500 字。面经撤回或下架时评论记录保留但不公开；面经重新发布或管理员解除限制后恢复显示。
+评论通过 experience_id 关联面经，内容最大 500 字。管理员下架时评论隐藏并保留；作者删除面经时评论、点赞和收藏清空，重发使用新的面经 ID。
 
 ### 4.9 question_standard_cache
 
@@ -190,9 +190,9 @@ test_status、test_fingerprint、last_tested_at、last_test_message 保存连接
 
 ### 5.2 删除与清理
 
-- 删除面试：设置 deleted_at、purge_after 和逻辑删除标志，并撤回公开面经；
+- 删除面试：设置 deleted_at、purge_after 和逻辑删除标志；已发布面经保留独立快照与公开状态；
 - 7 天内恢复：原样恢复音频、转写、问题、评分和用户内容，不调用 AI；
-- 到期清理：事务内清理音频、转写、问题、笔记、收藏、评论、面经和配置快照，仅保留最小删除审计信息；
+- 到期清理：事务内清理面试音频、转写、问题、私人笔记、私人问题收藏和配置快照；独立面经及其评论、点赞、收藏继续保留；
 - 删除简历：仅从简历库隐藏；历史面试继续读取快照；隐藏简历在不存在面试引用后才允许物理清理。
 
 ## 6. 索引与查询约束

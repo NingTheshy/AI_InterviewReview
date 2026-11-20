@@ -62,12 +62,12 @@ class ExperienceControllerTest {
             ExperienceListResponse item = ExperienceListResponse.builder()
                     .id(1L)
                     .title("Java 面试")
-                    .companyName("阿里巴巴")
+                    .positionTitle("Java工程师")
                     .build();
             PageResult<ExperienceListResponse> pageResult = new PageResult<>(
                     List.of(item), 1, 1, 10);
             when(experienceService.listPublic(anyInt(), anyInt(),
-                    any(), any(), any(), any())).thenReturn(pageResult);
+                    any(), any(), any())).thenReturn(pageResult);
 
             mockMvc.perform(get("/experiences")
                             .param("page", "1")
@@ -82,10 +82,10 @@ class ExperienceControllerTest {
         void list_WithFilters() throws Exception {
             PageResult<ExperienceListResponse> pageResult = new PageResult<>(List.of(), 0, 1, 10);
             when(experienceService.listPublic(anyInt(), anyInt(),
-                    any(), any(), any(), any())).thenReturn(pageResult);
+                    any(), any(), any())).thenReturn(pageResult);
 
             mockMvc.perform(get("/experiences")
-                            .param("companyName", "阿里巴巴")
+                            .param("keyword", "Java")
                             .param("sortBy", "viewCount"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.total").value(0));
@@ -104,9 +104,9 @@ class ExperienceControllerTest {
             ExperienceDetailResponse detail = ExperienceDetailResponse.builder()
                     .id(1L)
                     .title("Java 面试")
-                    .companyName("阿里巴巴")
+                    .positionTitle("Java工程师")
                     .build();
-            when(experienceService.getDetail(anyLong())).thenReturn(detail);
+            when(experienceService.getDetail(anyLong(), any())).thenReturn(detail);
 
             mockMvc.perform(get("/experiences/{id}", 1L))
                     .andExpect(status().isOk())
@@ -117,7 +117,7 @@ class ExperienceControllerTest {
         @Test
         @DisplayName("获取面经详情 - 面经不存在")
         void getDetail_NotFound() throws Exception {
-            when(experienceService.getDetail(anyLong()))
+            when(experienceService.getDetail(anyLong(), any()))
                     .thenThrow(new BusinessException(5003, "面经已下架或不存在"));
 
             mockMvc.perform(get("/experiences/{id}", 1L))
