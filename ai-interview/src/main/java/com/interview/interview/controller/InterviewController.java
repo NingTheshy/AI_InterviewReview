@@ -18,6 +18,8 @@ import org.springframework.web.multipart.MultipartFile;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.Valid;
 import java.util.List;
+import java.time.LocalDateTime;
+import org.springframework.format.annotation.DateTimeFormat;
 
 /**
  * 面试控制器
@@ -56,10 +58,13 @@ public class InterviewController {
             @RequestParam(value = "companyName", required = false) String companyName,
             @RequestParam("positionTitle") @NotBlank(message = "岗位名称不能为空") String positionTitle,
             @RequestParam(value = "industry", required = false) String industry,
-            @RequestParam("interviewType") @NotBlank(message = "面试类型不能为空") String interviewType) {
+            @RequestParam("interviewType") @NotBlank(message = "面试类型不能为空") String interviewType,
+            @RequestParam(value = "interviewRound", required = false) String interviewRound,
+            @RequestParam(value = "interviewAt", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime interviewAt) {
         Long userId = SecurityUtils.getCurrentUserId();
         Long id = interviewService.upload(userId, audioFile, resumeId, jdText,
-                title, companyName, positionTitle, industry, interviewType);
+                title, companyName, positionTitle, industry, interviewType, interviewRound, interviewAt);
         return Result.success(id);
     }
 

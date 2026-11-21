@@ -19,6 +19,12 @@ public class CommentManagementResponse {
     /** 评论 ID */
     private Long id;
 
+    /** 被回复的评论 ID，顶层评论为空。 */
+    private Long parentId;
+
+    /** 被回复的评论正文，仅管理员可见。 */
+    private String parentContent;
+
     /** 分享 ID */
     private Long experienceId;
 
@@ -28,9 +34,18 @@ public class CommentManagementResponse {
     /** 用户名（关联查询） */
     private String username;
 
+    private String authorDisplayName;
+
+    private String experienceTitle;
+
+    /** 0 正常，1 已删除。 */
+    private Integer deleted;
+
     /** 评论内容 */
     private String content;
 
     /** 创建时间 */
     private LocalDateTime createdAt;
+
+    private LocalDateTime deletedAt;
 }

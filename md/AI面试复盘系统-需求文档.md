@@ -387,7 +387,7 @@ ai-web → ai-interview → ai-common
 
 - 登录用户可对当前可见面经发表评论、点赞和收藏整篇面经，并可取消点赞和收藏。
 - 每个用户对一篇面经至多一条点赞与收藏关系。面经收藏列表独立于私人问题收藏。
-- 评论为一级纯文本，最长 500 字；评论者、发布者和管理员按现有权限删除评论。下架时评论隐藏并保留，解除下架后恢复可见。
+- 评论为多级纯文本回复，单条最长 500 字；可以回复任意一条未删除评论，顶层评论和每层回复分别分页，页面缩进最多三级。评论者、发布者和管理员按现有权限删除评论。删除父评论时该评论及其全部后代回复立即隐藏，七天后物理清理。下架时整条评论链隐藏并保留，解除下架后恢复可见。
 ### 3.6 AI 配置模块
 
 #### 3.6.1 模型配置管理
@@ -453,6 +453,7 @@ ai-web → ai-interview → ai-common
 | user:status:update | 启用或禁用用户账号 | admin |
 | user:role:assign | 为其他账号分配预置角色 | admin |
 | interview:read_all | 查看所有用户的面试数据 | admin |
+| interview:manage_all | 取消或重试其他用户的面试处理任务 | admin |
 | experience:read_all | 查看全部面经及其管理状态 | admin |
 | experience:manage | 下架或恢复面经 | admin |
 | comment:read_all | 查看全部评论 | admin |
@@ -505,6 +506,7 @@ ai-web → ai-interview → ai-common
 | GET | `/experiences` | 公开 | 仅返回已发布且当前可见的面经 |
 | GET | `/experiences/{id}` | 公开 | 仅返回已发布且当前可见的面经 |
 | GET | `/experiences/{id}/comments` | 公开 | 面经必须公开可见 |
+| GET | `/experiences/{id}/comments/{parentId}/replies` | 公开 | 面经必须公开可见，按层分页 |
 | POST | `/experiences/{id}/comments` | `comment:manage_own` | 面经必须公开可见 |
 | DELETE | `/comments/{id}` | `comment:manage_own` | 仅评论作者或面经发布者可删除 |
 | GET | `/admin/users` | `user:read` | 可按条件查询全部用户 |
@@ -512,10 +514,16 @@ ai-web → ai-interview → ai-common
 | PUT | `/admin/users/{id}/status` | `user:status:update` | 禁止破坏最后管理者；记录审计日志 |
 | PUT | `/admin/users/{id}/role` | `user:role:assign` | 禁止修改自己、越权授权和产生无角色账号；记录审计日志 |
 | GET | `/admin/stats/overview` | `system:stats:read` | 统计口径仅包含允许纳入的数据 |
-| GET | `/admin/interviews` | `interview:read_all` | 跨用户只读查询 |
+| GET | `/admin/interviews` | `interview:read_all` | 跨用户分页查询 |
+| GET | `/admin/interviews/{id}` | `interview:read_all` | 跨用户查看完整复盘 |
+| GET | `/admin/interviews/{id}/audio` | `interview:read_all` | 仅面试音频，不含简历文件 |
+| POST | `/admin/interviews/{id}/cancel` | `interview:manage_all` | 仅处理中的面试；记录审计 |
+| POST | `/admin/interviews/{id}/retry` | `interview:manage_all` | 仅失败或已取消的面试；记录审计 |
 | GET | `/admin/experiences` | `experience:read_all` | 查看公开及非公开面经状态 |
+| GET | `/admin/experiences/{id}` | `experience:read_all` | 查看已选题目的快照 |
 | PUT | `/admin/experiences/{id}/status` | `experience:manage` | 按数字 ID 下架/恢复并记录审计日志 |
 | GET | `/admin/comments` | `comment:read_all` | 跨用户查询评论 |
+| GET | `/admin/comments/{id}` | `comment:read_all` | 查看评论全文及回复上下文 |
 | DELETE | `/admin/comments/{id}` | `comment:manage` | 删除任意评论并记录审计日志 |
 | GET | `/admin/audit-logs` | `audit:read` | 只读分页查询，不提供修改或删除接口 |
 | GET | `/ai-configs` | `ai_config:read` | 返回值必须对密钥脱敏 |
@@ -549,11 +557,16 @@ Swagger/Knife4j 文档仅在开发、测试环境公开；Druid 等监控入口�
 - 各处理状态面试数分布
 - 平均面试评分
 
-#### 3.7.4 面经与评论管理
+#### 3.7.4 面试管理
 
-- 管理员可查看所有面经列表，支持下架/恢复面经
+- 管理员按标题、用户、公司、岗位、处理状态、回收站状态和创建时间组合筛选全部原始面试；详情只读展示基础信息、JD 与绑定简历正文、录音与转写、AI 评分。
+- 管理员仅可编辑标题、公司、岗位和面试轮次；可取消处理中任务、重试失败或已取消任务。删除进入七天回收站，恢复不自动重启 AI。所有修改记录审计。
+
+#### 3.7.5 经验与评论管理
+
+- 经验管理只展示已发布面经，支持标题、作者、公司、岗位、治理状态和发布时间筛选；只读预览公开题目快照，下架或重新上架，不提供管理员编辑、删除。
 - 管理员可查看所有评论列表，支持删除任意评论
-- 下架后的面经在面经广场与原数字 ID 链接均不可见，只有管理员能解除下架
+- 下架后的面经在面经广场与原数字 ID 链接均不可见，作者可查看但不能编辑或删除，只有管理员能重新上架
 
 ---
 
@@ -769,7 +782,8 @@ interviewType: "coding"
 | GET | `/experiences`、`/experiences/{id}` | 广场列表和可见面经详情 | 否 |
 | POST/DELETE | `/experiences/{id}/like` | 点赞、取消点赞 | 是 |
 | POST/DELETE | `/experiences/{id}/favorite` | 收藏、取消收藏 | 是 |
-| GET/POST | `/experiences/{id}/comments` | 查询或发表一级评论 | 查询公开，发表需登录 |
+| GET/POST | `/experiences/{id}/comments` | 分页查询顶层评论；发表顶层评论或在请求中填写 `parentId` 回复评论 | 查询公开，发表需登录 |
+| GET | `/experiences/{id}/comments/{parentId}/replies` | 分页查询某条评论的直接回复 | 公开面经可见 |
 | DELETE | `/comments/{id}` | 删除有权管理的评论 | 是 |
 
 发布请求示例：
@@ -792,6 +806,8 @@ interviewType: "coding"
         "records": [
             {
                 "id": 1,
+                "parentId": null,
+                "replyCount": 2,
                 "userId": 2,
                 "nickname": "张三",
                 "avatar": "/avatars/0123456789abcdef0123456789abcdef.png",
@@ -810,9 +826,11 @@ interviewType: "coding"
 ```json
 POST /experiences/123/comments
 {
-    "content": "感谢分享，很有帮助！"
+    "content": "感谢分享，很有帮助！",
+    "parentId": null
 }
 ```
+回复时将 `parentId` 设置为该面经下未删除评论的 ID；公开列表不返回已删除的评论及其后代。管理员评论列表默认仅显示正常评论，可按正文、作者、面经、状态和时间组合筛选，并查看评论全文及回复上下文。
 
 ### 4.7 AI 配置模块 (ai-ai)
 
@@ -834,10 +852,19 @@ POST /experiences/123/comments
 | PUT | `/admin/users/{id}/status` | 禁用/启用用户 | 是 | user:status:update |
 | PUT | `/admin/users/{id}/role` | 替换用户的预置角色集合 | 是 | user:role:assign |
 | GET | `/admin/stats/overview` | 获取系统统计数据 | 是 | system:stats:read |
-| GET | `/admin/interviews` | 查看所有用户面试数据（分页） | 是 | interview:read_all |
-| GET | `/admin/experiences` | 查看所有面经（分页） | 是 | experience:read_all |
-| PUT | `/admin/experiences/{id}/status` | 下架/恢复面经 | 是 | experience:manage |
+| GET | `/admin/interviews` | 查看全部原始面试及回收站记录，支持组合筛选和分页 | 是 | interview:read_all |
+| GET | `/admin/interviews/{id}` | 查看完整只读面试复盘 | 是 | interview:read_all |
+| GET | `/admin/interviews/{id}/audio` | 播放面试录音 | 是 | interview:read_all |
+| POST | `/admin/interviews/{id}/cancel` | 取消处理中的面试 | 是 | interview:manage_all |
+| POST | `/admin/interviews/{id}/retry` | 重试失败或已取消的面试 | 是 | interview:manage_all |
+| PUT | `/admin/interviews/{id}` | 编辑标题、公司、岗位和面试轮次 | 是 | interview:manage_all |
+| DELETE | `/admin/interviews/{id}` | 移入七天回收站 | 是 | interview:manage_all |
+| POST | `/admin/interviews/{id}/restore` | 从回收站恢复 | 是 | interview:manage_all |
+| GET | `/admin/experiences` | 查看已发布面经，支持组合筛选和分页 | 是 | experience:read_all |
+| GET | `/admin/experiences/{id}` | 查看面经题目快照 | 是 | experience:read_all |
+| PUT | `/admin/experiences/{id}/status` | 下架/重新上架已发布面经 | 是 | experience:manage |
 | GET | `/admin/comments` | 查看所有评论（分页） | 是 | comment:read_all |
+| GET | `/admin/comments/{id}` | 查看评论全文及回复上下文 | 是 | comment:read_all |
 | DELETE | `/admin/comments/{id}` | 删除任意评论 | 是 | comment:manage |
 
 **禁用用户请求示例：**

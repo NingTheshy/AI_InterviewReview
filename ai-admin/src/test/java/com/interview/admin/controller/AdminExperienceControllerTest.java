@@ -2,6 +2,7 @@ package com.interview.admin.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.admin.dto.ExperienceManagementResponse;
+import com.interview.admin.dto.AdminExperienceQuery;
 import com.interview.admin.dto.ExperienceStatusRequest;
 import com.interview.admin.service.AdminService;
 import com.interview.common.exception.BusinessException;
@@ -78,7 +79,7 @@ class AdminExperienceControllerTest {
                     .viewCount(100)
                     .publishedAt(LocalDateTime.now())
                     .build();
-            when(adminService.listExperiences(anyInt(), anyInt()))
+            when(adminService.searchExperiences(any(AdminExperienceQuery.class)))
                     .thenReturn(new PageResult<>(List.of(experience), 1, 1, 10));
 
             mockMvc.perform(get("/admin/experiences")
@@ -92,7 +93,7 @@ class AdminExperienceControllerTest {
         @Test
         @DisplayName("获取面经列表 - 空列表")
         void listExperiences_Empty() throws Exception {
-            when(adminService.listExperiences(anyInt(), anyInt()))
+            when(adminService.searchExperiences(any(AdminExperienceQuery.class)))
                     .thenReturn(new PageResult<>(List.of(), 0, 1, 10));
 
             mockMvc.perform(get("/admin/experiences")

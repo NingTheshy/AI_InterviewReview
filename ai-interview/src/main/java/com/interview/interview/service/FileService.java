@@ -9,6 +9,8 @@ import java.nio.file.Path;
 public interface FileService {
     FileDownload prepareUserDownload(String filename, Long userId, String rangeHeader);
 
+    FileDownload prepareAdminInterviewAudio(Long interviewId, String rangeHeader);
+
     FileDownload prepareAsrDownload(String filename, long expires, String token);
 
     void copy(FileDownload download, OutputStream output) throws IOException;

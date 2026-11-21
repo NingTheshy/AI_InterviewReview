@@ -28,6 +28,12 @@ public class InterviewDetailResponse {
 
     /** 职位名称 */
     private String positionTitle;
+    private String interviewRound;
+    private LocalDateTime interviewAt;
+    private String jdText;
+    private String resumeText;
+    private LocalDateTime deletedAt;
+    private LocalDateTime purgeAfter;
 
     /** 行业分类 */
     private String industry;

@@ -8,6 +8,7 @@ import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
 import com.interview.auth.service.AuditService;
 import com.interview.common.result.PageResult;
+import com.interview.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,9 +20,11 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /** 审计表格应展示可读含义，同时保留原始记录。 */
 @ExtendWith(MockitoExtension.class)
@@ -32,6 +35,17 @@ class AdminAuditReadServiceTest {
     @Mock private AdminAuditLookupMapper lookupMapper;
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks private AdminAuditReadService service;
+
+    @Test
+    void usesOnlyStandardPageSizes() {
+        for (int size : List.of(10, 20, 50)) {
+            when(auditService.list(1, size)).thenReturn(new PageResult<>(List.of(), 0, 1, size));
+            assertEquals(size, service.list(1, size).getSize());
+        }
+        assertThrows(BusinessException.class, () -> service.list(1, 100));
+        assertThrows(BusinessException.class, () -> service.list(0, 10));
+        verifyNoInteractions(userMapper, lookupMapper);
+    }
 
     @Test
     void resolvesOperatorTargetAndStatusChange() {

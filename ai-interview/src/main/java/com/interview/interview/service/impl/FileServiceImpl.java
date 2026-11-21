@@ -53,6 +53,17 @@ public class FileServiceImpl implements FileService {
         return prepare(filename, rangeHeader);
     }
 
+    @Override
+    public FileDownload prepareAdminInterviewAudio(Long interviewId, String rangeHeader) {
+        Interview interview = interviewMapper.selectAnyById(interviewId);
+        if (interview == null || interview.getPurgedAt() != null || interview.getAudioFilePath() == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
+        String filename = interview.getAudioFilePath();
+        validateFilename(filename);
+        return prepare(filename, rangeHeader);
+    }
+
     /**
      * 为 Fun-ASR 准备签名授权的完整音频下载。
      *

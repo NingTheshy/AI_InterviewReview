@@ -9,6 +9,8 @@ import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
 import com.interview.auth.service.AuditService;
 import com.interview.common.result.PageResult;
+import com.interview.common.constant.ErrorCode;
+import com.interview.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +34,9 @@ public class AdminAuditReadService {
     private final ObjectMapper objectMapper;
 
     public PageResult<AdminAuditLogResponse> list(int page, int size) {
+        if (page < 1 || (size != 10 && size != 20 && size != 50)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "分页参数不合法，仅支持每页10、20或50条");
+        }
         PageResult<PermissionAuditLog> rawPage = auditService.list(page, size);
         List<PermissionAuditLog> logs = rawPage.getRecords();
         if (logs.isEmpty()) {
@@ -104,6 +109,7 @@ public class AdminAuditReadService {
             case "AI_CONFIG" -> firstNonBlank(text(after.path("configName")),
                     text(before.path("configName")), configName, "已删除的 AI 配置");
             case "INTERVIEW_EXPERIENCE" -> "面经 #" + log.getTargetId();
+            case "INTERVIEW" -> "面试 #" + log.getTargetId();
             case "INTERVIEW_COMMENT" -> "评论 #" + log.getTargetId();
             default -> "资源 #" + log.getTargetId();
         };
@@ -127,6 +133,11 @@ public class AdminAuditReadService {
                 default -> "修改面经状态";
             };
             case "COMMENT_DELETE" -> "删除评论";
+            case "INTERVIEW_ADMIN_CANCEL" -> "取消面试处理";
+            case "INTERVIEW_ADMIN_RETRY" -> "重试面试处理";
+            case "INTERVIEW_ADMIN_EDIT" -> "编辑面试基础信息";
+            case "INTERVIEW_ADMIN_DELETE" -> "将面试移入回收站";
+            case "INTERVIEW_ADMIN_RESTORE" -> "恢复面试";
             default -> "其他管理操作";
         };
     }
@@ -144,6 +155,11 @@ public class AdminAuditReadService {
             case "EXPERIENCE_STATUS_UPDATE" -> "将" + targetName + "由"
                     + moderationLabel(before) + "改为" + moderationLabel(after);
             case "COMMENT_DELETE" -> "删除了" + targetName;
+            case "INTERVIEW_ADMIN_CANCEL" -> "取消了" + targetName + "的处理任务";
+            case "INTERVIEW_ADMIN_RETRY" -> "重新提交了" + targetName + "的处理任务";
+            case "INTERVIEW_ADMIN_EDIT" -> "修改了" + targetName + "的基础信息";
+            case "INTERVIEW_ADMIN_DELETE" -> "将" + targetName + "移入回收站";
+            case "INTERVIEW_ADMIN_RESTORE" -> "恢复了" + targetName;
             default -> "操作代码：" + log.getAction();
         };
     }

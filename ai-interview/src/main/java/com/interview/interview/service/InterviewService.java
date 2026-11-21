@@ -39,6 +39,12 @@ public interface InterviewService {
                 String jdText, String title, String companyName,
                 String positionTitle, String industry, String interviewType);
 
+    /** 可选的面试轮次与真实面试时间由上传者填写；历史记录保持为空。 */
+    Long upload(Long userId, MultipartFile audioFile, Long resumeId,
+                String jdText, String title, String companyName,
+                String positionTitle, String industry, String interviewType,
+                String interviewRound, java.time.LocalDateTime interviewAt);
+
     /**
      * 分页查询当前用户的面试记录
      *
@@ -70,6 +76,9 @@ public interface InterviewService {
      * @throws com.interview.common.exception.BusinessException 面试不存在或无权限
      */
     InterviewDetailResponse getDetail(Long id, Long userId);
+
+    /** 管理员读取普通记录或回收站内尚未清理的完整复盘。 */
+    InterviewDetailResponse getDetailForAdmin(Long id);
 
     /**
      * 删除面试记录（软删除，仅限记录所有者）
@@ -114,6 +123,9 @@ public interface InterviewService {
 
     /** 取消处理中任务并保留已经落库的阶段产物。 */
     void cancel(Long id, Long userId);
+
+    /** 管理员取消处理中的面试，沿用任务令牌失效规则并记录管理员操作原因。 */
+    void cancelByAdmin(Long id, Long ownerUserId);
 
     /** 已完成面试只重新执行问答识别和评分。 */
     void reanalyze(Long id, Long userId);

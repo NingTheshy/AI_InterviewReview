@@ -204,7 +204,7 @@
 | `FileController` | `/files/**`、`/asr-files/**` | `FileService` | 文件名与文件资源 |
 | `AiConfigController` | `/ai-configs/**` | `AiConfigService` | AI 配置 DTO；密钥输出应脱敏 |
 | `AdminUserController` | `/admin/users/**` | `AdminService` | 用户列表、状态、角色 |
-| `AdminInterviewController` | `/admin/interviews` | `AdminService` | 全局面试分页查询 |
+| `AdminInterviewController` | `/admin/interviews` | `AdminService` | 全局面试分页、完整复盘、取消与重试处理任务；音频由 `FileController` 单独鉴权 |
 | `AdminExperienceController` | `/admin/experiences/**` | `AdminService` | 面经列表与公开状态 |
 | `AdminCommentController` | `/admin/comments/**` | `AdminService` | 评论列表与管理删除 |
 | `AdminStatsController` | `/admin/stats/overview` | `AdminService` | 系统汇总统计 |

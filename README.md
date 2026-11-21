@@ -14,6 +14,7 @@
 - AI 任务支持取消、阶段重试、仅重评、租约续期、旧令牌拒绝写回和应用启动恢复。
 - JWT + Redis 黑名单认证、RBAC、文件所有权校验，以及供 DashScope 拉取音频的短时 HMAC 签名 URL。
 - 用户头像在个人资料页本地上传，服务端校验 JPG/PNG 并裁成 256×256 PNG；未上传时显示默认头像。
+- 管理员在“面试管理”筛选全部原始面试、查看完整复盘、编辑标题/公司/岗位/轮次、取消或重试任务，并可删除至七天回收站及恢复；“经验管理”只展示已发布面经，提供只读预览和下架/重新上架。两类操作分别使用现有权限码并记录审计。
 
 ## 技术栈
 
@@ -65,8 +66,10 @@ mysql -u root -p ai_interview < sql/data.sql
 ```
 
 `schema.sql` 只包含当前完整表结构，`data.sql` 包含预置角色、权限码、角色权限关系，以及 DeepSeek、千问 Audio 3.1、Paraformer-v2 配置，且可重复执行。
+升级现有开发库时，重新执行 `data.sql` 以补齐新增的 `interview:manage_all` 管理员权限；该权限与查看全部面试的 `interview:read_all` 分离。
 项目不再保留分散的历史增量脚本。已有数据库升级前必须先备份并与当前 `schema.sql` 做结构差异迁移，不能直接在旧库上重复执行建表脚本；已经处于当前结构的数据库可单独重复执行 `data.sql` 补齐初始化数据。
 本次评分改造为 `interview_question` 增加追问、回答证据及 K/C/L 难度字段；启动新版代码前，已有开发库需完成对应结构同步，或在备份后按 `schema.sql` 重建。
+已有数据库需按 `schema.sql` 补齐 `interview_comment` 的 `updated_at`、`parent_id`、`reply_to_user_id`、`deleted_at` 和 `purge_after`。本地开发库已同步；其他环境升级表结构后再运行新版代码。
 
 ### 2. 配置环境变量
 
@@ -142,7 +145,7 @@ DashScope：千问 Audio 3.1（主）/Paraformer-v2（备）整段转写
 | 简历 | `/resumes` | 异步上传、列表、详情、失败重试与隐藏 |
 | 面试与笔记 | `/interviews` | 创建、列表、详情、状态、取消、重试、重评、恢复、角色校正和笔记 |
 | 面经 | `/interviews/{id}/publication`、`/me/experiences`、`/experiences` | 逐题预览与发布、本人编辑删除、公开浏览；仅选中的题目及可选 AI 标准答案公开 |
-| 评论与收藏 | `/comments`、`/favorites`、`/me/experience-favorites` | 一级评论、私人问题收藏与公开面经收藏 |
+| 评论与收藏 | `/experiences/{id}/comments`、`/experiences/{id}/comments/{parentId}/replies`、`/favorites`、`/me/experience-favorites` | 多级评论及回复、私人问题收藏与公开面经收藏 |
 | 文件 | `/files`、`/asr-files` | 用户文件 Range 下载、生产公网 URL 模式下的 DashScope 短时签名下载 |
 | AI 配置 | `/ai-configs` | 管理员维护、连接测试与默认模型配置 |
 | 管理后台 | `/admin/**` | 用户、统计、面试、面经治理、评论和审计日志管理 |

@@ -63,6 +63,8 @@ CREATE TABLE `interview` (
     `title` VARCHAR(200) COMMENT '面试标题',
     `company_name` VARCHAR(100) COMMENT '公司名称',
     `position_title` VARCHAR(100) COMMENT '职位名称',
+    `interview_round` VARCHAR(50) COMMENT '面试轮次',
+    `interview_at` DATETIME COMMENT '实际面试时间',
     `industry` VARCHAR(50) COMMENT '行业分类',
     `company_tier` TINYINT COMMENT '公司分级: 1-超大厂 2-大厂 3-中厂 4-小厂 5-初创（内部使用，前端不展示）',
     `interview_type` VARCHAR(30) COMMENT '面试类型: coding/behavioral/system_design/comprehensive',
@@ -258,11 +260,17 @@ CREATE TABLE `experience_favorite` (
 CREATE TABLE `interview_comment` (
     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '评论ID',
     `experience_id` BIGINT NOT NULL COMMENT '公开面经ID',
+    `parent_id` BIGINT NULL COMMENT '直接回复的评论ID，顶层评论为空',
+    `reply_to_user_id` BIGINT NULL COMMENT '被回复者用户ID',
     `user_id` BIGINT NOT NULL COMMENT '评论者用户ID',
     `content` VARCHAR(500) NOT NULL COMMENT '评论内容',
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
+    `deleted_at` DATETIME NULL COMMENT '删除时间',
+    `purge_after` DATETIME NULL COMMENT '到期清理时间',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX `idx_experience_id` (`experience_id`),
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX `idx_experience_id` (`experience_id`, `parent_id`, `created_at`),
+    INDEX `idx_purge_after` (`deleted`, `purge_after`),
     INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面经评论表';
 

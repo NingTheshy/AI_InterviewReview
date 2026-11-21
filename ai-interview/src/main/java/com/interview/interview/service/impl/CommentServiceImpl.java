@@ -1,6 +1,5 @@
 package com.interview.interview.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.auth.entity.User;
 import com.interview.auth.mapper.UserMapper;
@@ -17,17 +16,19 @@ import com.interview.interview.service.CommentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import java.util.stream.Collectors;
 
 /**
  * 评论服务实现类
  * <p>
  * 提供面经评论的查看、发表和删除功能。
- * 评论通过分享 Token 关联到具体的面经。
+ * 评论通过面经 ID 关联，根评论和每层回复分别分页。
  * </p>
  */
 @Slf4j
@@ -38,6 +39,7 @@ public class CommentServiceImpl implements CommentService {
     private final InterviewCommentMapper commentMapper;
     private final InterviewExperienceMapper experienceMapper;
     private final UserMapper userMapper;
+    private final CommentDeletionService deletionService;
 
     /**
      * {@inheritDoc}
@@ -45,18 +47,28 @@ public class CommentServiceImpl implements CommentService {
     @Override
     public PageResult<CommentResponse> listByExperienceId(Long experienceId, int page, int size) {
         InterviewExperience experience = requireVisible(experienceId);
+        return listPage(experience.getId(), null, page, size);
+    }
 
-        // 查询该分享下的所有评论（分页）
-        Page<InterviewComment> pageParam = new Page<>(page, size);
-        LambdaQueryWrapper<InterviewComment> commentWrapper = new LambdaQueryWrapper<>();
-        commentWrapper.eq(InterviewComment::getExperienceId, experience.getId());
-        commentWrapper.orderByDesc(InterviewComment::getCreatedAt);
+    @Override
+    public PageResult<CommentResponse> listReplies(Long experienceId, Long parentId, int page, int size) {
+        InterviewExperience experience = requireVisible(experienceId);
+        InterviewComment parent = commentMapper.selectById(parentId);
+        if (parent == null || !experience.getId().equals(parent.getExperienceId())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), ErrorCode.NOT_FOUND.getMessage());
+        }
+        return listPage(experienceId, parentId, page, size);
+    }
 
-        Page<InterviewComment> result = commentMapper.selectPage(pageParam, commentWrapper);
+    private PageResult<CommentResponse> listPage(Long experienceId, Long parentId, int page, int size) {
+        if (page < 1 || size < 1 || size > 50) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "分页参数不合法");
+        }
+        Page<InterviewComment> result = commentMapper.selectThreadPage(new Page<>(page, size), experienceId, parentId);
 
-        // 批量查询用户信息
         List<Long> userIds = result.getRecords().stream()
-                .map(InterviewComment::getUserId)
+                .flatMap(comment -> Stream.of(comment.getUserId(), comment.getReplyToUserId()))
+                .filter(java.util.Objects::nonNull)
                 .distinct()
                 .collect(Collectors.toList());
 
@@ -67,16 +79,19 @@ public class CommentServiceImpl implements CommentService {
                     .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
         }
 
-        // 构建带用户信息的评论响应
         Map<Long, User> finalUserMap = userMap;
         List<CommentResponse> commentResponses = result.getRecords().stream()
                 .map(comment -> {
                     User user = finalUserMap.get(comment.getUserId());
+                    User parentAuthor = finalUserMap.get(comment.getReplyToUserId());
                     return CommentResponse.builder()
                             .id(comment.getId())
+                            .parentId(comment.getParentId())
+                            .replyCount(comment.getReplyCount())
+                            .replyToNickname(parentAuthor != null ? displayName(parentAuthor) : null)
                             .userId(comment.getUserId())
-                            .nickname(user != null ? user.getNickname() : "未知用户")
-                            .avatar(user != null ? AvatarPaths.visibleUrl(user.getAvatar()) : null)
+                            .nickname(user != null ? displayName(user) : "未知用户")
+                            .avatar(user == null ? null : AvatarPaths.visibleUrl(user.getAvatar()))
                             .content(comment.getContent())
                             .createdAt(comment.getCreatedAt())
                             .build();
@@ -90,7 +105,14 @@ public class CommentServiceImpl implements CommentService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional
     public void addComment(Long experienceId, Long userId, String content) {
+        addComment(experienceId, userId, content, null);
+    }
+
+    @Override
+    @Transactional
+    public void addComment(Long experienceId, Long userId, String content, Long parentId) {
         // 验证评论内容
         if (content == null || content.trim().isEmpty()) {
             throw new BusinessException(ErrorCode.COMMENT_EMPTY.getCode(),
@@ -102,10 +124,22 @@ public class CommentServiceImpl implements CommentService {
         }
 
         InterviewExperience experience = requireVisible(experienceId);
+        commentMapper.lockExperience(experience.getId());
+        Long replyToUserId = null;
+        if (parentId != null) {
+            InterviewComment parent = commentMapper.selectById(parentId);
+            if (parent == null || !experience.getId().equals(parent.getExperienceId())
+                    || Integer.valueOf(1).equals(parent.getDeleted())) {
+                throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "回复的评论不存在或已删除");
+            }
+            replyToUserId = parent.getUserId();
+        }
 
         // 创建评论
         InterviewComment comment = new InterviewComment();
         comment.setExperienceId(experience.getId());
+        comment.setParentId(parentId);
+        comment.setReplyToUserId(replyToUserId);
         comment.setUserId(userId);
         comment.setContent(content.trim());
         commentMapper.insert(comment);
@@ -127,7 +161,7 @@ public class CommentServiceImpl implements CommentService {
         // 检查权限：评论作者或面经发布者可删除
         if (comment.getUserId().equals(userId)) {
             // 评论作者可以删除
-            commentMapper.deleteById(commentId);
+            deletionService.deleteThread(comment);
             log.info("评论作者删除评论: commentId={}, userId={}", commentId, userId);
             return;
         }
@@ -136,7 +170,7 @@ public class CommentServiceImpl implements CommentService {
         InterviewExperience experience = experienceMapper.selectById(comment.getExperienceId());
         if (experience != null && experience.getUserId().equals(userId)) {
             // 面经发布者可以删除评论
-            commentMapper.deleteById(commentId);
+            deletionService.deleteThread(comment);
             log.info("面经发布者删除评论: commentId={}, userId={}", commentId, userId);
             return;
         }
@@ -153,5 +187,10 @@ public class CommentServiceImpl implements CommentService {
                     ErrorCode.EXPERIENCE_NOT_FOUND.getMessage());
         }
         return value;
+    }
+
+    private String displayName(User user) {
+        return user.getNickname() == null || user.getNickname().isBlank()
+                ? user.getUsername() : user.getNickname();
     }
 }

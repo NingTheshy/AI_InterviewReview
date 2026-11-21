@@ -37,6 +37,15 @@ public class FileController {
                 SecurityUtils.getCurrentUserId(), rangeHeader));
     }
 
+    /** 管理员仅可按面试记录读取音频，不开放用户简历文件。 */
+    @GetMapping("/admin/interviews/{id}/audio")
+    @PreAuthorize("hasAuthority('interview:read_all')")
+    public ResponseEntity<StreamingResponseBody> serveAdminInterviewAudio(
+            @PathVariable Long id,
+            @RequestHeader(value = "Range", required = false) String rangeHeader) {
+        return toResponse(fileService.prepareAdminInterviewAudio(id, rangeHeader));
+    }
+
     /** 返回短时 HMAC 签名授权的完整音频，供 DashScope 拉取转写源文件。 */
     @GetMapping("/asr-files/{filename:.+}")
     public ResponseEntity<StreamingResponseBody> serveAsrFile(

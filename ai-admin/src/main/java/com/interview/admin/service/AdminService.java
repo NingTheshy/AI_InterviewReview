@@ -80,6 +80,21 @@ public interface AdminService {
      */
     PageResult<InterviewManagementResponse> listInterviews(int page, int size, Long userId, Integer status);
 
+    PageResult<InterviewManagementResponse> searchInterviews(AdminInterviewQuery query);
+
+    /** 管理员读取完整面试复盘。 */
+    com.interview.interview.dto.InterviewDetailResponse getInterviewDetail(Long interviewId);
+
+    /** 管理员取消处理中的面试。 */
+    void cancelInterview(Long interviewId);
+
+    /** 管理员重试失败或已取消的面试。 */
+    void retryInterview(Long interviewId);
+
+    void editInterview(Long interviewId, AdminInterviewEditRequest request);
+    void deleteInterview(Long interviewId);
+    void restoreInterview(Long interviewId);
+
     // ==================== 面经管理 ====================
 
     /**
@@ -90,6 +105,11 @@ public interface AdminService {
      * @return 面经管理列表
      */
     PageResult<ExperienceManagementResponse> listExperiences(int page, int size);
+
+    PageResult<ExperienceManagementResponse> searchExperiences(AdminExperienceQuery query);
+
+    /** 查看已选题目的公开快照，下架后仍可供管理员核查。 */
+    ExperienceManagementDetailResponse getExperienceDetail(Long experienceId);
 
     /**
      * 设置面经公开状态（下架/恢复）
@@ -111,6 +131,12 @@ public interface AdminService {
      * @return 评论管理列表
      */
     PageResult<CommentManagementResponse> listComments(int page, int size, Long userId);
+
+    /** 按正文、作者、面经、状态和时间组合查询评论。 */
+    PageResult<CommentManagementResponse> searchComments(AdminCommentQuery query);
+
+    /** 查看评论全文及其回复上下文。 */
+    CommentManagementResponse getCommentDetail(Long commentId);
 
     /**
      * 删除评论（逻辑删除）

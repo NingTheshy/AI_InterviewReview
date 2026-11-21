@@ -19,6 +19,7 @@ public final class PermissionCodes {
     public static final String USER_STATUS_UPDATE = "user:status:update";
     public static final String USER_ROLE_ASSIGN = "user:role:assign";
     public static final String INTERVIEW_READ_ALL = "interview:read_all";
+    public static final String INTERVIEW_MANAGE_ALL = "interview:manage_all";
     public static final String EXPERIENCE_READ_ALL = "experience:read_all";
     public static final String EXPERIENCE_MANAGE = "experience:manage";
     public static final String COMMENT_READ_ALL = "comment:read_all";

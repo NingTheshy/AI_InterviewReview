@@ -76,7 +76,7 @@ class InterviewControllerTest {
             MockMultipartFile audioFile = new MockMultipartFile(
                     "audioFile", "test.wav", "audio/wav", "audio content".getBytes());
             when(interviewService.upload(anyLong(), any(), any(), anyString(),
-                    any(), any(), any(), any(), any())).thenReturn(TEST_INTERVIEW_ID);
+                    any(), any(), any(), any(), any(), any(), any())).thenReturn(TEST_INTERVIEW_ID);
 
             mockMvc.perform(multipart("/interviews/upload")
                             .file(audioFile)

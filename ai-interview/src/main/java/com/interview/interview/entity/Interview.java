@@ -16,6 +16,8 @@ public class Interview extends BaseEntity {
     private String title;
     private String companyName;
     private String positionTitle;
+    private String interviewRound;
+    private LocalDateTime interviewAt;
     private String industry;
     private Integer companyTier;
     private String interviewType;

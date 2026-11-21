@@ -132,20 +132,45 @@ class ExperiencePublicationServiceImplTest {
     }
 
     @Test
-    void deletingPublicationClearsInteractionsButRetainsBlockedHistory() {
+    void deletingPublicationClearsInteractions() {
+        InterviewExperience experience = new InterviewExperience();
+        experience.setId(20L); experience.setUserId(1L);
+        experience.setPublishStatus(InterviewExperience.PUBLISHED);
+        experience.setModerationStatus(InterviewExperience.NORMAL);
+        when(experienceMapper.selectById(20L)).thenReturn(experience);
+
+        service.deletePublication(20L, 1L);
+
+        assertEquals(InterviewExperience.DELETED, experience.getPublishStatus());
+        assertEquals(InterviewExperience.NORMAL, experience.getModerationStatus());
+        verify(interactionMapper).clearComments(20L);
+        verify(interactionMapper).clearLikes(20L);
+        verify(interactionMapper).clearFavorites(20L);
+    }
+
+    @Test
+    void blockedPublicationCannotBeDeletedBeforeAdminUnblocksIt() {
         InterviewExperience experience = new InterviewExperience();
         experience.setId(20L); experience.setUserId(1L);
         experience.setPublishStatus(InterviewExperience.PUBLISHED);
         experience.setModerationStatus(InterviewExperience.BLOCKED);
         when(experienceMapper.selectById(20L)).thenReturn(experience);
 
-        service.deletePublication(20L, 1L);
+        assertThrows(BusinessException.class, () -> service.deletePublication(20L, 1L));
+        verify(experienceMapper, never()).updateById(any());
+    }
 
-        assertEquals(InterviewExperience.DELETED, experience.getPublishStatus());
-        assertEquals(InterviewExperience.BLOCKED, experience.getModerationStatus());
-        verify(interactionMapper).clearComments(20L);
-        verify(interactionMapper).clearLikes(20L);
-        verify(interactionMapper).clearFavorites(20L);
+    @Test
+    void blockedPublicationCannotBeEditedByAuthor() {
+        InterviewExperience experience = new InterviewExperience();
+        experience.setId(20L); experience.setUserId(1L);
+        experience.setPublishStatus(InterviewExperience.PUBLISHED);
+        experience.setModerationStatus(InterviewExperience.BLOCKED);
+        when(experienceMapper.selectById(20L)).thenReturn(experience);
+
+        assertThrows(BusinessException.class,
+                () -> service.updatePublication(20L, 1L, new ExperiencePublicationRequest()));
+        verify(experienceMapper, never()).updateById(any());
     }
 
     @Test

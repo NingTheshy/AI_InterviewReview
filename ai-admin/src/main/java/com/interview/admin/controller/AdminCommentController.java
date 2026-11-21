@@ -1,6 +1,7 @@
 package com.interview.admin.controller;
 
 import com.interview.admin.dto.CommentManagementResponse;
+import com.interview.admin.dto.AdminCommentQuery;
 import com.interview.admin.service.AdminService;
 import com.interview.common.result.PageResult;
 import com.interview.common.result.Result;
@@ -37,10 +38,15 @@ public class AdminCommentController {
     @GetMapping
     @PreAuthorize("hasAuthority('comment:read_all')")
     public Result<PageResult<CommentManagementResponse>> listComments(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) Long userId) {
-        return Result.success(adminService.listComments(page, size, userId));
+            @ModelAttribute AdminCommentQuery query) {
+        return Result.success(adminService.searchComments(query));
+    }
+
+    @Operation(summary = "查看评论详情")
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('comment:read_all')")
+    public Result<CommentManagementResponse> getCommentDetail(@PathVariable Long id) {
+        return Result.success(adminService.getCommentDetail(id));
     }
 
     /**

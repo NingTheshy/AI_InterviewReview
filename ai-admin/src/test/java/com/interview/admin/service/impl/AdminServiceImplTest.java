@@ -14,9 +14,14 @@ import com.interview.common.result.PageResult;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewComment;
 import com.interview.interview.entity.InterviewExperience;
+import com.interview.interview.entity.ExperienceQuestionSnapshot;
 import com.interview.interview.mapper.InterviewCommentMapper;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewExperienceMapper;
+import com.interview.interview.mapper.ExperienceQuestionSnapshotMapper;
+import com.interview.interview.service.InterviewService;
+import com.interview.interview.service.impl.CommentDeletionService;
+import com.interview.interview.dto.InterviewDetailResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -53,6 +58,9 @@ class AdminServiceImplTest {
     private InterviewExperienceMapper interviewExperienceMapper;
 
     @Mock
+    private ExperienceQuestionSnapshotMapper experienceQuestionSnapshotMapper;
+
+    @Mock
     private InterviewCommentMapper interviewCommentMapper;
 
     @Mock
@@ -60,6 +68,12 @@ class AdminServiceImplTest {
 
     @Mock
     private AuditService auditService;
+
+    @Mock
+    private InterviewService interviewService;
+
+    @Mock
+    private CommentDeletionService commentDeletionService;
 
     @InjectMocks
     private AdminServiceImpl adminService;
@@ -225,6 +239,82 @@ class AdminServiceImplTest {
 
     // ==================== 面试管理测试 ====================
 
+    @Test
+    void adminDetailUsesAdminResponseIncludingRecycleBin() {
+        InterviewDetailResponse detail = InterviewDetailResponse.builder().id(8L).build();
+        when(interviewService.getDetailForAdmin(8L)).thenReturn(detail);
+
+        assertSame(detail, adminService.getInterviewDetail(8L));
+        verify(interviewService).getDetailForAdmin(8L);
+    }
+
+    @Test
+    void adminCancelAndRetryReuseTaskRules() {
+        Interview interview = new Interview();
+        interview.setId(8L);
+        interview.setUserId(42L);
+        interview.setStatus(0);
+        when(interviewMapper.selectById(8L)).thenReturn(interview);
+
+        adminService.cancelInterview(8L);
+        verify(interviewService).cancelByAdmin(8L, 42L);
+        interview.setStatus(2);
+        adminService.retryInterview(8L);
+        verify(interviewService).retry(8L, 42L);
+    }
+
+    @Test
+    void adminSearchIncludesRecycleBinAndOwnerDisplayName() {
+        Interview interview = new Interview();
+        interview.setId(8L);
+        interview.setUserId(TEST_USER_ID);
+        interview.setDeleted(1);
+        interview.setInterviewRound("一面");
+        Page<Interview> page = new Page<>(1, 10);
+        page.setRecords(List.of(interview));
+        page.setTotal(1);
+        when(interviewMapper.selectAdminPage(any(Page.class), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(page);
+        when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(testUser));
+        AdminInterviewQuery query = new AdminInterviewQuery();
+        query.setDeleted(1);
+
+        InterviewManagementResponse row = adminService.searchInterviews(query).getRecords().get(0);
+
+        assertEquals("Test User", row.getOwnerDisplayName());
+        assertEquals("一面", row.getInterviewRound());
+        assertEquals(1, row.getDeleted());
+        verify(interviewMapper).selectAdminPage(any(Page.class), any(), any(), any(), any(), any(), eq(1), any(), any());
+    }
+
+    @Test
+    void adminSearchRejectsUnsupportedPageSize() {
+        AdminInterviewQuery query = new AdminInterviewQuery();
+        query.setSize(1000);
+        assertThrows(BusinessException.class, () -> adminService.searchInterviews(query));
+        verifyNoInteractions(interviewMapper);
+    }
+
+    @Test
+    void adminEditAndRecycleUseExistingInterviewLifecycle() {
+        Interview interview = new Interview();
+        interview.setId(8L);
+        interview.setUserId(42L);
+        when(interviewMapper.selectById(8L)).thenReturn(interview);
+        AdminInterviewEditRequest request = new AdminInterviewEditRequest();
+        request.setTitle("一面");
+        request.setPositionTitle("后端工程师");
+        adminService.editInterview(8L, request);
+        assertEquals("一面", interview.getTitle());
+        verify(interviewMapper).updateById(interview);
+
+        adminService.deleteInterview(8L);
+        verify(interviewService).delete(8L, 42L);
+        when(interviewMapper.selectDeletedById(8L)).thenReturn(interview);
+        adminService.restoreInterview(8L);
+        verify(interviewService).restore(8L, 42L);
+    }
+
     @Nested
     @DisplayName("面试管理方法测试")
     class InterviewManagementTest {
@@ -384,6 +474,51 @@ class AdminServiceImplTest {
         }
 
         @Test
+        void adminSearchOnlyUsesPublishedQuery() {
+            Page<InterviewExperience> page = new Page<>(1, 10);
+            page.setRecords(List.of(testShare));
+            page.setTotal(1);
+            when(interviewExperienceMapper.selectAdminPage(any(Page.class), any(), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(page);
+            when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(testUser));
+            AdminExperienceQuery query = new AdminExperienceQuery();
+            query.setModeration(InterviewExperience.BLOCKED);
+
+            assertEquals(1, adminService.searchExperiences(query).getRecords().size());
+            verify(interviewExperienceMapper).selectAdminPage(any(Page.class), any(), any(), any(), any(),
+                    eq(InterviewExperience.BLOCKED), any(), any());
+        }
+
+        @Test
+        void withdrawnExperienceCannotBeModerated() {
+            testShare.setPublishStatus(InterviewExperience.DELETED);
+            when(interviewExperienceMapper.selectById(1L)).thenReturn(testShare);
+            assertThrows(BusinessException.class, () -> adminService.setExperienceStatus(1L, 0));
+            verify(interviewExperienceMapper, never()).updateById(any());
+        }
+
+        @Test
+        @DisplayName("下架面经可预览公开快照，关闭答案时不返回答案")
+        void blockedExperiencePreviewHidesDisabledAnswers() {
+            testShare.setModerationStatus(InterviewExperience.BLOCKED);
+            testShare.setShowAnswers(0);
+            ExperienceQuestionSnapshot question = new ExperienceQuestionSnapshot();
+            question.setQuestionIndex(1);
+            question.setQuestionText("什么是事务？");
+            question.setReferenceAnswer("ACID");
+            when(interviewExperienceMapper.selectById(1L)).thenReturn(testShare);
+            when(userMapper.selectById(TEST_USER_ID)).thenReturn(testUser);
+            when(experienceQuestionSnapshotMapper.selectList(any(LambdaQueryWrapper.class)))
+                    .thenReturn(List.of(question));
+
+            ExperienceManagementDetailResponse detail = adminService.getExperienceDetail(1L);
+
+            assertEquals(InterviewExperience.BLOCKED, detail.getModerationStatus());
+            assertEquals("什么是事务？", detail.getQuestions().get(0).getQuestionText());
+            assertNull(detail.getQuestions().get(0).getReferenceAnswer());
+        }
+
+        @Test
         @DisplayName("设置面经状态成功")
         void setExperienceStatus_Success() {
             // Arrange
@@ -492,13 +627,12 @@ class AdminServiceImplTest {
         void deleteComment_Success() {
             // Arrange
             when(interviewCommentMapper.selectById(1L)).thenReturn(testComment);
-            when(interviewCommentMapper.deleteById(1L)).thenReturn(1);
 
             // Act
             adminService.deleteComment(1L);
 
             // Assert
-            verify(interviewCommentMapper).deleteById(1L);
+            verify(commentDeletionService).deleteThread(testComment);
         }
 
         @Test

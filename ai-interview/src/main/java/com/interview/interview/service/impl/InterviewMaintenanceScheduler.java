@@ -26,6 +26,7 @@ public class InterviewMaintenanceScheduler {
     private final ResumeAsyncService resumeAsyncService;
     private final UserResumeMapper resumeMapper;
     private final InterviewCleanupService cleanupService;
+    private final CommentCleanupService commentCleanupService;
 
     @EventListener(ApplicationReadyEvent.class)
     public void recoverInterruptedTasks() {
@@ -51,6 +52,7 @@ public class InterviewMaintenanceScheduler {
 
     @Scheduled(fixedDelayString = "${interview.retention.cleanup-interval-ms:3600000}")
     public void purgeExpiredInterviews() {
+        commentCleanupService.purgeExpiredComments();
         for (Interview interview : interviewMapper.selectExpiredDeleted()) {
             cleanupService.purgeInterview(interview);
         }

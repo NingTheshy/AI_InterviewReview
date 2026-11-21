@@ -37,6 +37,7 @@ INSERT INTO `permission` (`permission_name`, `permission_label`) VALUES
 ('user:status:update', '更新用户状态'),
 ('user:role:assign', '分配用户角色'),
 ('interview:read_all', '查看全部面试数据'),
+('interview:manage_all', '管理全部面试处理任务'),
 ('experience:read_all', '查看全部面经'),
 ('experience:manage', '管理面经'),
 ('comment:read_all', '查看全部评论'),
@@ -67,7 +68,7 @@ INSERT IGNORE INTO `role_permission` (`role_id`, `permission_id`)
 SELECT r.`id`, p.`id`
 FROM `role` r
 JOIN `permission` p ON p.`permission_name` IN (
-    'user:read', 'user:status:update', 'user:role:assign', 'interview:read_all',
+    'user:read', 'user:status:update', 'user:role:assign', 'interview:read_all', 'interview:manage_all',
     'experience:read_all', 'experience:manage', 'comment:read_all', 'comment:manage',
     'ai_config:read', 'ai_config:manage', 'system:stats:read',
     'system:monitor:read', 'audit:read'

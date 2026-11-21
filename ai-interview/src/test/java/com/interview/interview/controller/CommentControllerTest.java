@@ -96,13 +96,27 @@ class CommentControllerTest {
         void addComment_Success() throws Exception {
             CommentRequest request = new CommentRequest();
             request.setContent("很好的面经！");
-            doNothing().when(commentService).addComment(anyLong(), anyLong(), anyString());
+            doNothing().when(commentService).addComment(anyLong(), anyLong(), anyString(), isNull());
 
             mockMvc.perform(post("/experiences/{id}/comments", 1L)
                             .contentType("application/json")
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
+        }
+
+        @Test
+        @DisplayName("可回复指定评论")
+        void addReply_Success() throws Exception {
+            CommentRequest request = new CommentRequest();
+            request.setContent("同意你的看法");
+            request.setParentId(8L);
+
+            mockMvc.perform(post("/experiences/{id}/comments", 1L)
+                            .contentType("application/json")
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isOk());
+            verify(commentService).addComment(1L, TEST_USER_ID, "同意你的看法", 8L);
         }
 
         @Test

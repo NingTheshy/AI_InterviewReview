@@ -104,6 +104,16 @@ public class InterviewServiceImpl implements InterviewService {
     public Long upload(Long userId, MultipartFile audioFile, Long resumeId,
                        String jdText, String title, String companyName,
                        String positionTitle, String industry, String interviewType) {
+        return upload(userId, audioFile, resumeId, jdText, title, companyName,
+                positionTitle, industry, interviewType, null, null);
+    }
+
+    @Override
+    @Transactional
+    public Long upload(Long userId, MultipartFile audioFile, Long resumeId,
+                       String jdText, String title, String companyName,
+                       String positionTitle, String industry, String interviewType,
+                       String interviewRound, LocalDateTime interviewAt) {
         FileUtil.validateAudioFile(audioFile);
         if (jdText == null || jdText.isBlank()) {
             throw badRequest("岗位JD不能为空");
@@ -118,6 +128,8 @@ public class InterviewServiceImpl implements InterviewService {
         positionTitle = positionTitle.trim();
         companyName = trimToNull(companyName);
         industry = trimToNull(industry);
+        interviewRound = trimToNull(interviewRound);
+        if (interviewRound != null && interviewRound.length() > 50) throw badRequest("面试轮次不能超过50字");
 
         UserResume resume = resumeService.requireReady(resumeId, userId);
 
@@ -161,6 +173,8 @@ public class InterviewServiceImpl implements InterviewService {
         interview.setCompanyName(companyName);
         interview.setPositionTitle(positionTitle);
         interview.setIndustry(industry);
+        interview.setInterviewRound(interviewRound);
+        interview.setInterviewAt(interviewAt);
         interview.setInterviewType(interviewType);
         interview.setResumeId(resume.getId());
         interview.setJdText(jdText);
@@ -309,6 +323,22 @@ public class InterviewServiceImpl implements InterviewService {
                     ErrorCode.INTERVIEW_ACCESS_DENIED.getMessage());
         }
 
+        return buildDetail(interview);
+    }
+
+    @Override
+    public InterviewDetailResponse getDetailForAdmin(Long id) {
+        Interview interview = interviewMapper.selectById(id);
+        if (interview == null) interview = interviewMapper.selectDeletedById(id);
+        if (interview == null || interview.getPurgedAt() != null) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(),
+                    ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
+        }
+        return buildDetail(interview);
+    }
+
+    private InterviewDetailResponse buildDetail(Interview interview) {
+        Long id = interview.getId();
         // 查询问题列表
         LambdaQueryWrapper<InterviewQuestion> questionWrapper = new LambdaQueryWrapper<>();
         questionWrapper.eq(InterviewQuestion::getInterviewId, id);
@@ -478,6 +508,16 @@ public class InterviewServiceImpl implements InterviewService {
     @Override
     @Transactional
     public void cancel(Long id, Long userId) {
+        cancelInternal(id, userId, false);
+    }
+
+    @Override
+    @Transactional
+    public void cancelByAdmin(Long id, Long ownerUserId) {
+        cancelInternal(id, ownerUserId, true);
+    }
+
+    private void cancelInternal(Long id, Long userId, boolean byAdmin) {
         Interview interview = ownedInterview(id, userId);
         if (!Integer.valueOf(InterviewStatus.PROCESSING.getCode()).equals(interview.getStatus())) {
             throw badRequest("只有处理中的面试可以取消");
@@ -486,8 +526,8 @@ public class InterviewServiceImpl implements InterviewService {
         interview.setProcessingToken(null);
         interview.setLeaseExpiresAt(null);
         interview.setHeartbeatAt(LocalDateTime.now());
-        interview.setLastErrorCode("CANCELLED_BY_USER");
-        interview.setErrorMessage("用户已取消处理");
+        interview.setLastErrorCode(byAdmin ? "CANCELLED_BY_ADMIN" : "CANCELLED_BY_USER");
+        interview.setErrorMessage(byAdmin ? "管理员已取消处理" : "用户已取消处理");
         interviewMapper.updateById(interview);
     }
 
@@ -684,6 +724,12 @@ public class InterviewServiceImpl implements InterviewService {
                 .title(interview.getTitle())
                 .companyName(interview.getCompanyName())
                 .positionTitle(interview.getPositionTitle())
+                .interviewRound(interview.getInterviewRound())
+                .interviewAt(interview.getInterviewAt())
+                .jdText(interview.getJdText())
+                .resumeText(interview.getResumeText())
+                .deletedAt(interview.getDeletedAt())
+                .purgeAfter(interview.getPurgeAfter())
                 .industry(interview.getIndustry())
                 .interviewType(interview.getInterviewType())
                 .status(interview.getStatus())

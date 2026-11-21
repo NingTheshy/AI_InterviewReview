@@ -994,6 +994,7 @@ LLM 只保留 DeepSeek，不开放其他文本 provider。ASR provider 固定为
 | GET | /experiences/{id} | 查看可见公开面经 | 否 |
 | GET | /experiences | 面经广场列表 | 否 |
 | GET | /experiences/{id}/comments | 评论列表 | 否 |
+| GET | /experiences/{id}/comments/{parentId}/replies | 指定评论的直接回复（分页） | 否 |
 | POST | /experiences/{id}/comments | 发表评论 | 是 |
 | DELETE | /comments/{id} | 删除评论 | 是 |
 
@@ -1010,10 +1011,19 @@ LLM 只保留 DeepSeek，不开放其他文本 provider。ASR provider 固定为
 | PUT | /admin/users/{id}/status | 禁用/启用用户 | user:status:update |
 | PUT | /admin/users/{id}/role | 修改用户角色集合 | user:role:assign |
 | GET | /admin/stats/overview | 系统统计 | system:stats:read |
-| GET | /admin/interviews | 所有面试数据 | interview:read_all |
-| GET | /admin/experiences | 所有面经 | experience:read_all |
-| PUT | /admin/experiences/{id}/status | 下架/恢复面经 | experience:manage |
+| GET | /admin/interviews | 所有原始面试，支持标题/用户/公司/岗位/状态/回收站/创建时间组合筛选 | interview:read_all |
+| GET | /admin/interviews/{id} | 完整只读复盘，含七天回收站记录 | interview:read_all |
+| GET | /admin/interviews/{id}/audio | 面试音频（支持 Range） | interview:read_all |
+| POST | /admin/interviews/{id}/cancel | 取消处理中的面试 | interview:manage_all |
+| POST | /admin/interviews/{id}/retry | 重试失败或已取消的面试 | interview:manage_all |
+| PUT | /admin/interviews/{id} | 仅修改标题、公司、岗位和轮次 | interview:manage_all |
+| DELETE | /admin/interviews/{id} | 移入七天回收站并取消运行中任务 | interview:manage_all |
+| POST | /admin/interviews/{id}/restore | 原样恢复，不自动重新处理 | interview:manage_all |
+| GET | /admin/experiences | 仅已发布面经，支持标题/作者/公司/岗位/治理状态/发布时间组合筛选 | experience:read_all |
+| GET | /admin/experiences/{id} | 面经已选题目快照 | experience:read_all |
+| PUT | /admin/experiences/{id}/status | 下架/重新上架已发布面经 | experience:manage |
 | GET | /admin/comments | 所有评论 | comment:read_all |
+| GET | /admin/comments/{id} | 评论全文及回复上下文 | comment:read_all |
 | DELETE | /admin/comments/{id} | 删除评论 | comment:manage |
 | GET | /admin/audit-logs | 权限与高风险操作审计日志 | audit:read |
 

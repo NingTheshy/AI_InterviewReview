@@ -1,6 +1,7 @@
 package com.interview.interview.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.interview.interview.entity.Interview;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -13,6 +14,23 @@ import java.util.List;
 
 @Mapper
 public interface InterviewMapper extends BaseMapper<Interview> {
+
+    @Select("<script>SELECT i.* FROM interview i LEFT JOIN user u ON u.id=i.user_id " +
+            "WHERE i.purged_at IS NULL " +
+            "<if test='title != null and title != \"\"'>AND i.title LIKE CONCAT('%',#{title},'%') </if>" +
+            "<if test='userKeyword != null and userKeyword != \"\"'>AND (u.username LIKE CONCAT('%',#{userKeyword},'%') OR u.nickname LIKE CONCAT('%',#{userKeyword},'%') OR CAST(i.user_id AS CHAR)=#{userKeyword}) </if>" +
+            "<if test='company != null and company != \"\"'>AND i.company_name LIKE CONCAT('%',#{company},'%') </if>" +
+            "<if test='position != null and position != \"\"'>AND i.position_title LIKE CONCAT('%',#{position},'%') </if>" +
+            "<if test='status != null'>AND i.status=#{status} </if>" +
+            "<if test='deleted != null'>AND i.deleted=#{deleted} </if>" +
+            "<if test='from != null'>AND i.created_at &gt;= #{from} </if>" +
+            "<if test='to != null'>AND i.created_at &lt;= #{to} </if>" +
+            "ORDER BY i.created_at DESC, i.id DESC</script>")
+    Page<Interview> selectAdminPage(Page<Interview> page, @Param("title") String title,
+            @Param("userKeyword") String userKeyword, @Param("company") String company,
+            @Param("position") String position, @Param("status") Integer status,
+            @Param("deleted") Integer deleted, @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
 
     @Select("SELECT * FROM interview WHERE user_id=#{userId} AND status=0 AND deleted=0 LIMIT 1 FOR UPDATE")
     Interview selectActiveForUpdate(@Param("userId") Long userId);
@@ -61,6 +79,9 @@ public interface InterviewMapper extends BaseMapper<Interview> {
 
     @Select("SELECT * FROM interview WHERE id=#{id} AND deleted=1")
     Interview selectDeletedById(@Param("id") Long id);
+
+    @Select("SELECT * FROM interview WHERE id=#{id}")
+    Interview selectAnyById(@Param("id") Long id);
 
     @Select("SELECT * FROM interview WHERE user_id=#{userId} AND deleted=1 AND purged_at IS NULL " +
             "ORDER BY deleted_at DESC")

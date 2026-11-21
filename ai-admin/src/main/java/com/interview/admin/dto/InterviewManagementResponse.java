@@ -24,6 +24,7 @@ public class InterviewManagementResponse {
 
     /** 用户名（关联查询） */
     private String username;
+    private String ownerDisplayName;
 
     /** 面试标题 */
     private String title;
@@ -33,8 +34,14 @@ public class InterviewManagementResponse {
 
     /** 职位名称 */
     private String positionTitle;
+    private String interviewRound;
+    private LocalDateTime interviewAt;
+    private Integer processingStep;
+    private Integer deleted;
+    private LocalDateTime purgeAfter;
+    private String errorMessage;
 
-    /** 面试状态：0-待处理, 1-转写中, 2-分析中, 3-已完成, 4-失败 */
+    /** 面试状态：0-处理中，1-已完成，2-失败，3-已取消。 */
     private Integer status;
 
     /** 综合评分(0-100) */

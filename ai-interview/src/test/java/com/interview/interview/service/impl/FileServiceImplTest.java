@@ -72,4 +72,15 @@ class FileServiceImplTest {
         assertEquals(400, assertThrows(ResponseStatusException.class,
                 () -> service.prepareUserDownload("../audio.mp3", 1L, null)).getStatusCode().value());
     }
+
+    @Test
+    void adminAudioRouteOnlyResolvesAudioOfExistingInterview() {
+        Interview interview = new Interview();
+        interview.setAudioFilePath("audio.mp3");
+        when(mapper.selectAnyById(7L)).thenReturn(interview);
+        FileDownload download = service.prepareAdminInterviewAudio(7L, "bytes=2-4");
+        assertEquals(3, download.length());
+        assertEquals(404, assertThrows(ResponseStatusException.class,
+                () -> service.prepareAdminInterviewAudio(8L, null)).getStatusCode().value());
+    }
 }

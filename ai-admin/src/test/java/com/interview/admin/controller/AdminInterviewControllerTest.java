@@ -1,6 +1,7 @@
 package com.interview.admin.controller;
 
 import com.interview.admin.dto.InterviewManagementResponse;
+import com.interview.admin.dto.AdminInterviewQuery;
 import com.interview.admin.service.AdminService;
 import com.interview.common.exception.GlobalExceptionHandler;
 import com.interview.common.result.PageResult;
@@ -73,7 +74,7 @@ class AdminInterviewControllerTest {
                     .overallScore(85)
                     .createdAt(LocalDateTime.now())
                     .build();
-            when(adminService.listInterviews(anyInt(), anyInt(), any(), any()))
+            when(adminService.searchInterviews(any(AdminInterviewQuery.class)))
                     .thenReturn(new PageResult<>(List.of(interview), 1, 1, 10));
 
             mockMvc.perform(get("/admin/interviews")
@@ -87,7 +88,7 @@ class AdminInterviewControllerTest {
         @Test
         @DisplayName("获取面试列表 - 空列表")
         void listInterviews_Empty() throws Exception {
-            when(adminService.listInterviews(anyInt(), anyInt(), any(), any()))
+            when(adminService.searchInterviews(any(AdminInterviewQuery.class)))
                     .thenReturn(new PageResult<>(List.of(), 0, 1, 10));
 
             mockMvc.perform(get("/admin/interviews")
@@ -100,20 +101,21 @@ class AdminInterviewControllerTest {
         @Test
         @DisplayName("获取面试列表 - 按用户筛选")
         void listInterviews_ByUserId() throws Exception {
-            when(adminService.listInterviews(anyInt(), anyInt(), anyLong(), any()))
+            when(adminService.searchInterviews(any(AdminInterviewQuery.class)))
                     .thenReturn(new PageResult<>(List.of(), 0, 1, 10));
 
             mockMvc.perform(get("/admin/interviews")
                             .param("page", "1")
                             .param("size", "10")
-                            .param("userId", "1"))
+                            .param("userKeyword", "1"))
                     .andExpect(status().isOk());
+            verify(adminService).searchInterviews(argThat(query -> "1".equals(query.getUserKeyword())));
         }
 
         @Test
         @DisplayName("获取面试列表 - 按状态筛选")
         void listInterviews_ByStatus() throws Exception {
-            when(adminService.listInterviews(anyInt(), anyInt(), any(), anyInt()))
+            when(adminService.searchInterviews(any(AdminInterviewQuery.class)))
                     .thenReturn(new PageResult<>(List.of(), 0, 1, 10));
 
             mockMvc.perform(get("/admin/interviews")
@@ -121,6 +123,7 @@ class AdminInterviewControllerTest {
                             .param("size", "10")
                             .param("status", "3"))
                     .andExpect(status().isOk());
+            verify(adminService).searchInterviews(argThat(query -> Integer.valueOf(3).equals(query.getStatus())));
         }
     }
 }

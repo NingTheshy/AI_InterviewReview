@@ -27,6 +27,7 @@ public class ExperienceManagementResponse {
 
     /** 用户名（关联查询） */
     private String username;
+    private String authorDisplayName;
 
     private String publishStatus;
     private String moderationStatus;
@@ -35,6 +36,8 @@ public class ExperienceManagementResponse {
 
     /** 岗位快照 */
     private String positionTitle;
+    /** 仅管理员可见，来自原始面试记录。 */
+    private String companyName;
 
     /** 浏览量 */
     private Integer viewCount;

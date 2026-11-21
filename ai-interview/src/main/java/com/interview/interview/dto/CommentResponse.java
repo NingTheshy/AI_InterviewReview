@@ -19,6 +19,15 @@ public class CommentResponse {
     /** 评论 ID */
     private Long id;
 
+    /** 直接回复的评论 ID，顶层评论为空。 */
+    private Long parentId;
+
+    /** 直接回复的用户昵称。 */
+    private String replyToNickname;
+
+    /** 该评论下直接回复的数量。 */
+    private Long replyCount;
+
     /** 评论者用户 ID */
     private Long userId;
 

@@ -75,7 +75,8 @@ public class SecurityConfig {
                     auth.requestMatchers("/auth/login", "/auth/register", "/auth/send-code").permitAll();
                     auth.requestMatchers(HttpMethod.GET,
                             "/experiences", "/experiences/{id}",
-                            "/experiences/{id}/comments").permitAll();
+                            "/experiences/{id}/comments",
+                            "/experiences/{id}/comments/{parentId}/replies").permitAll();
                     auth.requestMatchers(HttpMethod.GET, "/asr-files/**").permitAll();
                     auth.requestMatchers(HttpMethod.GET, "/avatars/**").permitAll();
                     auth.requestMatchers("/favicon.ico").permitAll();
@@ -112,6 +113,7 @@ public class SecurityConfig {
         if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
             path = path.substring(contextPath.length());
         }
-        return path.startsWith("/files/") || path.startsWith("/asr-files/");
+        return path.startsWith("/files/") || path.startsWith("/asr-files/")
+                || path.matches("/admin/interviews/\\d+/audio");
     }
 }

@@ -16,9 +16,14 @@ import com.interview.common.utils.SecurityUtils;
 import com.interview.interview.entity.Interview;
 import com.interview.interview.entity.InterviewComment;
 import com.interview.interview.entity.InterviewExperience;
+import com.interview.interview.entity.ExperienceQuestionSnapshot;
 import com.interview.interview.mapper.InterviewCommentMapper;
 import com.interview.interview.mapper.InterviewMapper;
 import com.interview.interview.mapper.InterviewExperienceMapper;
+import com.interview.interview.mapper.ExperienceQuestionSnapshotMapper;
+import com.interview.interview.service.InterviewService;
+import com.interview.interview.service.impl.CommentDeletionService;
+import com.interview.interview.dto.InterviewDetailResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -47,9 +52,12 @@ public class AdminServiceImpl implements AdminService {
     private final UserMapper userMapper;
     private final InterviewMapper interviewMapper;
     private final InterviewExperienceMapper interviewExperienceMapper;
+    private final ExperienceQuestionSnapshotMapper experienceQuestionSnapshotMapper;
     private final InterviewCommentMapper interviewCommentMapper;
     private final RbacService rbacService;
     private final AuditService auditService;
+    private final InterviewService interviewService;
+    private final CommentDeletionService commentDeletionService;
 
     // ==================== 用户管理 ====================
 
@@ -250,6 +258,100 @@ public class AdminServiceImpl implements AdminService {
         return new PageResult<>(records, result.getTotal(), page, size);
     }
 
+    @Override
+    public PageResult<InterviewManagementResponse> searchInterviews(AdminInterviewQuery query) {
+        validatePage(query.getPage(), query.getSize());
+        if (query.getStatus() != null && (query.getStatus() < 0 || query.getStatus() > 3)) badFilter();
+        if (query.getDeleted() != null && query.getDeleted() != 0 && query.getDeleted() != 1) badFilter();
+        validateRange(query.getFrom(), query.getTo());
+        Page<Interview> result = interviewMapper.selectAdminPage(new Page<>(query.getPage(), query.getSize()),
+                trim(query.getTitle()), trim(query.getUserKeyword()), trim(query.getCompany()),
+                trim(query.getPosition()), query.getStatus(), query.getDeleted(), query.getFrom(), query.getTo());
+        List<Long> ids = result.getRecords().stream().map(Interview::getUserId).distinct().toList();
+        Map<Long, User> users = getUsersByIds(ids);
+        List<InterviewManagementResponse> records = result.getRecords().stream().map(interview -> {
+            User owner = users.get(interview.getUserId());
+            String username = owner == null ? null : owner.getUsername();
+            String displayName = owner != null && owner.getNickname() != null && !owner.getNickname().isBlank()
+                    ? owner.getNickname() : username;
+            return InterviewManagementResponse.builder()
+                    .id(interview.getId()).userId(interview.getUserId()).username(username)
+                    .ownerDisplayName(displayName).title(interview.getTitle())
+                    .companyName(interview.getCompanyName()).positionTitle(interview.getPositionTitle())
+                    .interviewRound(interview.getInterviewRound()).interviewAt(interview.getInterviewAt())
+                    .status(interview.getStatus()).processingStep(interview.getProcessingStep())
+                    .deleted(interview.getDeleted()).purgeAfter(interview.getPurgeAfter())
+                    .errorMessage(interview.getErrorMessage()).overallScore(interview.getOverallScore())
+                    .createdAt(interview.getCreatedAt()).build();
+        }).toList();
+        return new PageResult<>(records, result.getTotal(), query.getPage(), query.getSize());
+    }
+
+    @Override
+    public InterviewDetailResponse getInterviewDetail(Long interviewId) {
+        return interviewService.getDetailForAdmin(interviewId);
+    }
+
+    @Override
+    @Transactional
+    public void cancelInterview(Long interviewId) {
+        Interview interview = requireAdminInterview(interviewId);
+        interviewService.cancelByAdmin(interviewId, interview.getUserId());
+        auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "INTERVIEW_ADMIN_CANCEL",
+                "INTERVIEW", String.valueOf(interviewId), String.valueOf(interview.getStatus()), "3");
+    }
+
+    @Override
+    @Transactional
+    public void retryInterview(Long interviewId) {
+        Interview interview = requireAdminInterview(interviewId);
+        interviewService.retry(interviewId, interview.getUserId());
+        auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "INTERVIEW_ADMIN_RETRY",
+                "INTERVIEW", String.valueOf(interviewId), String.valueOf(interview.getStatus()), "0");
+    }
+
+    @Override
+    @Transactional
+    public void editInterview(Long interviewId, AdminInterviewEditRequest request) {
+        Interview interview = requireAdminInterview(interviewId);
+        interview.setTitle(request.getTitle().trim());
+        interview.setCompanyName(trim(request.getCompanyName()));
+        interview.setPositionTitle(request.getPositionTitle().trim());
+        interview.setInterviewRound(trim(request.getInterviewRound()));
+        interviewMapper.updateById(interview);
+        auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "INTERVIEW_ADMIN_EDIT",
+                "INTERVIEW", String.valueOf(interviewId), null, null);
+    }
+
+    @Override
+    @Transactional
+    public void deleteInterview(Long interviewId) {
+        Interview interview = requireAdminInterview(interviewId);
+        interviewService.delete(interviewId, interview.getUserId());
+        auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "INTERVIEW_ADMIN_DELETE",
+                "INTERVIEW", String.valueOf(interviewId), null, null);
+    }
+
+    @Override
+    @Transactional
+    public void restoreInterview(Long interviewId) {
+        Interview interview = interviewMapper.selectDeletedById(interviewId);
+        if (interview == null) throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(),
+                ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
+        interviewService.restore(interviewId, interview.getUserId());
+        auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "INTERVIEW_ADMIN_RESTORE",
+                "INTERVIEW", String.valueOf(interviewId), null, null);
+    }
+
+    private Interview requireAdminInterview(Long interviewId) {
+        Interview interview = interviewMapper.selectById(interviewId);
+        if (interview == null) {
+            throw new BusinessException(ErrorCode.INTERVIEW_NOT_FOUND.getCode(),
+                    ErrorCode.INTERVIEW_NOT_FOUND.getMessage());
+        }
+        return interview;
+    }
+
     // ==================== 面经管理 ====================
 
     /**
@@ -288,6 +390,64 @@ public class AdminServiceImpl implements AdminService {
         return new PageResult<>(records, result.getTotal(), page, size);
     }
 
+    @Override
+    public PageResult<ExperienceManagementResponse> searchExperiences(AdminExperienceQuery query) {
+        validatePage(query.getPage(), query.getSize());
+        if (query.getModeration() != null && !query.getModeration().isBlank()
+                && !InterviewExperience.NORMAL.equals(query.getModeration())
+                && !InterviewExperience.BLOCKED.equals(query.getModeration())) badFilter();
+        validateRange(query.getFrom(), query.getTo());
+        Page<InterviewExperience> result = interviewExperienceMapper.selectAdminPage(
+                new Page<>(query.getPage(), query.getSize()), trim(query.getTitle()), trim(query.getAuthor()),
+                trim(query.getCompany()), trim(query.getPosition()), trim(query.getModeration()),
+                query.getFrom(), query.getTo());
+        Map<Long, User> users = getUsersByIds(result.getRecords().stream()
+                .map(InterviewExperience::getUserId).distinct().toList());
+        List<ExperienceManagementResponse> records = result.getRecords().stream().map(experience -> {
+            User author = users.get(experience.getUserId());
+            String authorName = author != null && author.getNickname() != null && !author.getNickname().isBlank()
+                    ? author.getNickname() : author == null ? null : author.getUsername();
+            Interview interview = interviewMapper.selectAnyById(experience.getInterviewId());
+            return ExperienceManagementResponse.builder()
+                    .id(experience.getId()).interviewId(experience.getInterviewId())
+                    .userId(experience.getUserId()).username(author == null ? null : author.getUsername())
+                    .authorDisplayName(authorName)
+                    .title(experience.getTitle()).positionTitle(experience.getPositionTitle())
+                    .companyName(interview == null ? null : interview.getCompanyName())
+                    .publishStatus(experience.getPublishStatus()).moderationStatus(experience.getModerationStatus())
+                    .publishedAt(experience.getPublishedAt()).viewCount(experience.getViewCount()).build();
+        }).toList();
+        return new PageResult<>(records, result.getTotal(), query.getPage(), query.getSize());
+    }
+
+    @Override
+    public ExperienceManagementDetailResponse getExperienceDetail(Long experienceId) {
+        InterviewExperience experience = interviewExperienceMapper.selectById(experienceId);
+        if (experience == null || !InterviewExperience.PUBLISHED.equals(experience.getPublishStatus())) {
+            throw new BusinessException(ErrorCode.EXPERIENCE_NOT_FOUND.getCode(), ErrorCode.EXPERIENCE_NOT_FOUND.getMessage());
+        }
+        User author = userMapper.selectById(experience.getUserId());
+        Interview source = interviewMapper.selectAnyById(experience.getInterviewId());
+        boolean showAnswers = Integer.valueOf(1).equals(experience.getShowAnswers());
+        List<ExperienceManagementDetailResponse.QuestionItem> questions = experienceQuestionSnapshotMapper
+                .selectList(new LambdaQueryWrapper<ExperienceQuestionSnapshot>()
+                        .eq(ExperienceQuestionSnapshot::getExperienceId, experienceId)
+                        .eq(ExperienceQuestionSnapshot::getSelected, 1)
+                        .orderByAsc(ExperienceQuestionSnapshot::getQuestionIndex))
+                .stream().map(question -> ExperienceManagementDetailResponse.QuestionItem.builder()
+                        .questionIndex(question.getQuestionIndex())
+                        .questionText(question.getQuestionText())
+                        .referenceAnswer(showAnswers ? question.getReferenceAnswer() : null)
+                        .build()).toList();
+        return ExperienceManagementDetailResponse.builder()
+                .id(experience.getId()).title(experience.getTitle()).positionTitle(experience.getPositionTitle())
+                .companyName(source == null ? null : source.getCompanyName())
+                .username(author == null ? null : author.getUsername())
+                .publishStatus(experience.getPublishStatus()).moderationStatus(experience.getModerationStatus())
+                .showReferenceAnswers(showAnswers).publishedAt(experience.getPublishedAt())
+                .questions(questions).build();
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -295,7 +455,7 @@ public class AdminServiceImpl implements AdminService {
     @Transactional
     public void setExperienceStatus(Long experienceId, Integer isPublic) {
         InterviewExperience share = interviewExperienceMapper.selectById(experienceId);
-        if (share == null) {
+        if (share == null || !InterviewExperience.PUBLISHED.equals(share.getPublishStatus())) {
             throw new BusinessException(ErrorCode.EXPERIENCE_NOT_FOUND.getCode(), ErrorCode.EXPERIENCE_NOT_FOUND.getMessage());
         }
         if (isPublic == null || (isPublic != 0 && isPublic != 1)) {
@@ -303,6 +463,7 @@ public class AdminServiceImpl implements AdminService {
         }
         String beforeStatus = share.getModerationStatus();
         String nextStatus = isPublic == 1 ? InterviewExperience.NORMAL : InterviewExperience.BLOCKED;
+        if (nextStatus.equals(beforeStatus)) return;
         share.setModerationStatus(nextStatus);
         interviewExperienceMapper.updateById(share);
         auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "EXPERIENCE_STATUS_UPDATE",
@@ -349,6 +510,44 @@ public class AdminServiceImpl implements AdminService {
         return new PageResult<>(records, result.getTotal(), page, size);
     }
 
+    @Override
+    public PageResult<CommentManagementResponse> searchComments(AdminCommentQuery query) {
+        if (query.getPage() < 1 || !Set.of(10, 20, 50).contains(query.getSize())
+                || (query.getStatus() == null || (query.getStatus() != 0 && query.getStatus() != 1))
+                || (query.getStartTime() != null && query.getEndTime() != null
+                    && query.getStartTime().isAfter(query.getEndTime()))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "分页或筛选参数不合法");
+        }
+        Page<InterviewComment> result = interviewCommentMapper.selectAdminPage(
+                new Page<>(query.getPage(), query.getSize()), query.getKeyword(), query.getAuthor(),
+                query.getExperience(), query.getUserId(), query.getStatus(),
+                query.getStartTime(), query.getEndTime());
+        List<CommentManagementResponse> records = result.getRecords().stream()
+                .map(this::toCommentManagementResponse).toList();
+        return new PageResult<>(records, result.getTotal(), query.getPage(), query.getSize());
+    }
+
+    @Override
+    public CommentManagementResponse getCommentDetail(Long commentId) {
+        InterviewComment comment = interviewCommentMapper.selectAdminById(commentId);
+        if (comment == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), ErrorCode.NOT_FOUND.getMessage());
+        }
+        return toCommentManagementResponse(comment);
+    }
+
+    private CommentManagementResponse toCommentManagementResponse(InterviewComment comment) {
+        String displayName = comment.getAuthorNickname();
+        if (displayName == null || displayName.isBlank()) displayName = comment.getAuthorUsername();
+        return CommentManagementResponse.builder()
+                .id(comment.getId()).parentId(comment.getParentId()).parentContent(comment.getParentContent())
+                .experienceId(comment.getExperienceId()).experienceTitle(comment.getExperienceTitle())
+                .userId(comment.getUserId()).username(comment.getAuthorUsername())
+                .authorDisplayName(displayName).content(comment.getContent())
+                .deleted(comment.getDeleted()).createdAt(comment.getCreatedAt())
+                .deletedAt(comment.getDeletedAt()).build();
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -361,7 +560,7 @@ public class AdminServiceImpl implements AdminService {
                     ErrorCode.NOT_FOUND.getMessage());
         }
 
-        interviewCommentMapper.deleteById(commentId);
+        commentDeletionService.deleteThread(comment);
         auditService.recordSuccess(SecurityUtils.getCurrentUserId(), "COMMENT_DELETE",
                 "INTERVIEW_COMMENT", String.valueOf(commentId),
                 Map.of("experienceId", comment.getExperienceId(), "userId", comment.getUserId()), null);
@@ -410,6 +609,28 @@ public class AdminServiceImpl implements AdminService {
 
         return userMapper.selectList(wrapper).stream()
                 .collect(Collectors.toMap(User::getId, User::getUsername, (a, b) -> a));
+    }
+
+    private Map<Long, User> getUsersByIds(List<Long> ids) {
+        if (ids.isEmpty()) return java.util.Collections.emptyMap();
+        return userMapper.selectList(new LambdaQueryWrapper<User>().in(User::getId, ids)).stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
+    }
+
+    private void validatePage(int page, int size) {
+        if (page < 1 || (size != 10 && size != 20 && size != 50)) badFilter();
+    }
+
+    private void validateRange(LocalDateTime from, LocalDateTime to) {
+        if (from != null && to != null && from.isAfter(to)) badFilter();
+    }
+
+    private void badFilter() {
+        throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "分页或筛选参数不合法");
+    }
+
+    private String trim(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     /**

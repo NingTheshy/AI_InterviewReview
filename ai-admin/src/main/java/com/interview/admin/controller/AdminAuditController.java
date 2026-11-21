@@ -28,7 +28,7 @@ public class AdminAuditController {
     @PreAuthorize("hasAuthority('audit:read')")
     public Result<PageResult<AdminAuditLogResponse>> list(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "10") int size) {
         return Result.success(auditReadService.list(page, size));
     }
 }

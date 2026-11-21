@@ -29,7 +29,7 @@ public class CommentController {
     /**
      * 获取面经评论列表（无需认证）
      *
-     * @param token 分享 Token
+     * @param id 面经 ID
      * @param page  页码
      * @param size  每页大小
      * @return 评论列表（分页）
@@ -43,10 +43,19 @@ public class CommentController {
         return Result.success(commentService.listByExperienceId(id, page, size));
     }
 
+    @Operation(summary = "获取评论的直接回复")
+    @GetMapping("/experiences/{id}/comments/{parentId}/replies")
+    public Result<PageResult<CommentResponse>> listReplies(@PathVariable Long id,
+                                                             @PathVariable Long parentId,
+                                                             @RequestParam(defaultValue = "1") int page,
+                                                             @RequestParam(defaultValue = "20") int size) {
+        return Result.success(commentService.listReplies(id, parentId, page, size));
+    }
+
     /**
      * 发表评论（需要认证）
      *
-     * @param token   分享 Token
+     * @param id 面经 ID
      * @param request 评论内容
      * @return 操作结果
      */
@@ -56,12 +65,12 @@ public class CommentController {
     public Result<Void> addComment(@PathVariable Long id,
                                    @Valid @RequestBody CommentRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
-        commentService.addComment(id, userId, request.getContent());
+        commentService.addComment(id, userId, request.getContent(), request.getParentId());
         return Result.success();
     }
 
     /**
-     * 删除评论（仅评论作者可删除）
+     * 删除评论及其全部回复
      *
      * @param id 评论 ID
      * @return 操作结果

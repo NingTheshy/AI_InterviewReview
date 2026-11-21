@@ -1,6 +1,7 @@
 package com.interview.admin.controller;
 
 import com.interview.admin.dto.CommentManagementResponse;
+import com.interview.admin.dto.AdminCommentQuery;
 import com.interview.admin.service.AdminService;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.exception.GlobalExceptionHandler;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -24,6 +26,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -73,7 +76,7 @@ class AdminCommentControllerTest {
                     .content("很好的面试分享！")
                     .createdAt(LocalDateTime.now())
                     .build();
-            when(adminService.listComments(anyInt(), anyInt(), any()))
+            when(adminService.searchComments(any()))
                     .thenReturn(new PageResult<>(List.of(comment), 1, 1, 10));
 
             mockMvc.perform(get("/admin/comments")
@@ -87,7 +90,7 @@ class AdminCommentControllerTest {
         @Test
         @DisplayName("获取评论列表 - 空列表")
         void listComments_Empty() throws Exception {
-            when(adminService.listComments(anyInt(), anyInt(), any()))
+            when(adminService.searchComments(any()))
                     .thenReturn(new PageResult<>(List.of(), 0, 1, 10));
 
             mockMvc.perform(get("/admin/comments")
@@ -100,7 +103,7 @@ class AdminCommentControllerTest {
         @Test
         @DisplayName("获取评论列表 - 按用户筛选")
         void listComments_ByUserId() throws Exception {
-            when(adminService.listComments(anyInt(), anyInt(), anyLong()))
+            when(adminService.searchComments(any()))
                     .thenReturn(new PageResult<>(List.of(), 0, 1, 10));
 
             mockMvc.perform(get("/admin/comments")
@@ -108,6 +111,24 @@ class AdminCommentControllerTest {
                             .param("size", "10")
                             .param("userId", "1"))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("组合筛选包含已删除回复")
+        void listComments_WithFilters() throws Exception {
+            when(adminService.searchComments(any())).thenReturn(new PageResult<>(List.of(), 0, 1, 10));
+
+            mockMvc.perform(get("/admin/comments")
+                            .param("keyword", "算法")
+                            .param("author", "张三")
+                            .param("status", "1"))
+                    .andExpect(status().isOk());
+
+            ArgumentCaptor<AdminCommentQuery> query = ArgumentCaptor.forClass(AdminCommentQuery.class);
+            verify(adminService).searchComments(query.capture());
+            assertEquals("算法", query.getValue().getKeyword());
+            assertEquals("张三", query.getValue().getAuthor());
+            assertEquals(1, query.getValue().getStatus());
         }
     }
 

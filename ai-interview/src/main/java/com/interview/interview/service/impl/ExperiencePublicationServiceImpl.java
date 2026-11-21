@@ -136,6 +136,7 @@ public class ExperiencePublicationServiceImpl implements ExperienceService {
     public ExperiencePublicationResponse updatePublication(Long experienceId, Long userId, ExperiencePublicationRequest request) {
         InterviewExperience value = owned(experienceId, userId);
         if (!InterviewExperience.PUBLISHED.equals(value.getPublishStatus())) throw bad("已删除面经不能直接编辑，请重新发布");
+        if (InterviewExperience.BLOCKED.equals(value.getModerationStatus())) throw forbidden();
         Map<Long, ExperienceQuestionSnapshot> available = candidates(value.getInterviewId(), userId, value);
         List<ExperienceQuestionSnapshot> chosen = validateSelection(request, available);
         value.setTitle(title(request.getTitle(), value.getPositionTitle()));
@@ -160,6 +161,7 @@ public class ExperiencePublicationServiceImpl implements ExperienceService {
     public void deletePublication(Long experienceId, Long userId) {
         InterviewExperience value = owned(experienceId, userId);
         if (!InterviewExperience.PUBLISHED.equals(value.getPublishStatus())) return;
+        if (InterviewExperience.BLOCKED.equals(value.getModerationStatus())) throw forbidden();
         value.setPublishStatus(InterviewExperience.DELETED);
         value.setLikeCount(0); value.setFavoriteCount(0);
         experienceMapper.updateById(value);

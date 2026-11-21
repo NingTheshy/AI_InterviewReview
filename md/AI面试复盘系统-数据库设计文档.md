@@ -92,7 +92,7 @@
 | 字段组 | 字段 | 约束与用途 |
 | --- | --- | --- |
 | 归属 | id、user_id | 面试主键与所有者 |
-| 基本信息 | title、company_name、position_title、industry、company_tier、interview_type | 类型限定为 coding、behavioral、system_design、comprehensive |
+| 基本信息 | title、company_name、position_title、interview_round、interview_at、industry、company_tier、interview_type | 轮次及实际面试时间可空；历史记录不以创建时间冒充实际面试时间。类型限定为 coding、behavioral、system_design、comprehensive |
 | 简历/JD | resume_id、resume_file_path、resume_text、jd_text | resume_id 绑定简历版本；正文和路径作为历史不可变快照 |
 | 音频 | audio_file_path、audio_file_size、audio_duration | MP3/WAV，最大 2GB、最长 2 小时 |
 | 转写 | transcript_text、transcript_segments、dialogue_turns | 完整文本、原始句子级 JSON 和按连续说话人合并的发言 JSON；保留句子/词毫秒时间戳、speakerId、角色及原始句子索引 |
@@ -141,7 +141,7 @@ note_type=INTERVIEW 时 question_id=0，每场面试保存一条 Markdown 总笔
 
 ### 4.8 interview_comment
 
-评论通过 experience_id 关联面经，内容最大 500 字。管理员下架时评论隐藏并保留；作者删除面经时评论、点赞和收藏清空，重发使用新的面经 ID。
+评论通过 `experience_id` 关联面经，`parent_id` 指向直接回复的评论，空值表示顶层评论；`reply_to_user_id` 用于显示回复对象。每条内容最长 500 字，顶层评论和每层直接回复分别分页。删除父评论时在同一事务内将该评论和全部后代回复标记为删除，设置 `deleted_at` 和 `purge_after`，公开接口立即不再返回整棵子树；七天后物理清理。表中保留 `created_at` 和 `updated_at`。管理员下架面经时评论隐藏并保留；作者删除面经时评论、点赞和收藏清空，重发使用新的面经 ID。
 
 ### 4.9 question_standard_cache
 
@@ -174,6 +174,7 @@ test_status、test_fingerprint、last_tested_at、last_test_message 保存连接
 - permission：唯一权限码及显示名称；
 - user_role：复合主键 (user_id, role_id)；管理员可同时拥有 USER 与 ADMIN 角色，权限取并集；
 - role_permission：复合主键 (role_id, permission_id)；管理员也必须通过该表获得每项权限；
+- `data.sql` 为 admin 角色预置 `interview:read_all`（查看跨用户复盘和音频）与 `interview:manage_all`（取消、重试跨用户处理任务）；两项权限分别授予。
 - permission_audit_log：记录操作人、动作、目标、非敏感前后数据、来源 IP、结果和失败原因。
 
 新注册账户自动关联 USER。角色变更后若账号将无角色，业务层自动补回 USER；最后管理者保护防止系统失去有效权限管理员。所有非公开业务接口遵循“身份认证 + 权限码 + 资源归属/业务规则，未明确授权则拒绝”。
